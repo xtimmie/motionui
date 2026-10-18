@@ -1645,6 +1645,7 @@ input[type='range'].slider.slider-vert::-moz-range-progress {
 /* inputs */
 [data-mu-design="glassy"] .inp,
 [data-mu-design="glassy"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+[data-mu-design="glassy"] textarea,
 [data-mu-design="glassy"] select {
   background: rgba(255,255,255,.05) !important;
   border-color: var(--glass-border) !important;
@@ -1652,6 +1653,7 @@ input[type='range'].slider.slider-vert::-moz-range-progress {
 }
 [data-mu-design="glassy"] .inp:focus,
 [data-mu-design="glassy"] input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):focus,
+[data-mu-design="glassy"] textarea:focus,
 [data-mu-design="glassy"] select:focus {
   background: rgba(255,255,255,.08) !important;
   border-color: color-mix(in oklch, var(--color-primary) 70%, var(--glass-border-hi)) !important;
