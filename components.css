@@ -1660,6 +1660,9 @@ input[type='range'].slider.slider-vert::-moz-range-progress {
   outline-color: transparent;
   box-shadow: var(--glass-spec-focused);
 }
+[data-mu-design="glassy"] .mu-ripple:has(> textarea.inp:focus) {
+  box-shadow: var(--glass-spec-focused);
+}
 /* skeletons */
 [data-mu-design="glassy"] .skeleton-card,
 [data-mu-design="glassy"] .skeleton-rect {
