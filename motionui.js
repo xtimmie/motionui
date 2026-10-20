@@ -1938,11 +1938,9 @@ void main() {
       if (!dragging) return;
       const dy = lastY - startY;
       if (dy < 0) {
-        // rubber-band upward: translateY with logarithmic resistance
-        const pull = Math.abs(dy);
-        const rubber = pull / (1 + pull * 0.018);
-        el.style.transformOrigin = '';
-        el.style.transform = `translateY(${-rubber}px)`;
+        const scale = 1 + Math.abs(dy) * 0.0004;
+        el.style.transformOrigin = 'bottom';
+        el.style.transform = `scaleY(${Math.min(scale, 1.05)})`;
       } else {
         el.style.transformOrigin = '';
         el.style.transform = `translateY(${dy / zk}px)`;
@@ -1977,13 +1975,15 @@ void main() {
       const _p = (_t1 - _t0) / 100;
       zk = (_p > 0.25 && _p < 4) ? _p : 1;
       el._dbgTop = _t0;
+      console.log('[sheetdrag] begin', { zk, zkOld: _zkOld, offsetH: _h, startY });
     }
 
     function endDrag(y) {
       if (!dragging) return;
       dragging = false; rafPending = false;
       const dy = y - startY;
-      const dismissThreshold = Math.max(60, el.offsetHeight * 0.675);
+      console.log('[sheetdrag] end', { fingerDy: dy, sheetDy: el.getBoundingClientRect().top - el._dbgTop, zk });
+      const dismissThreshold = Math.max(60, el.offsetHeight * 0.675) * (window.visualViewport?.scale ?? 1);
       // flick: fast downward velocity (px/ms) even with small distance
       const isFlick = velocity > 1.6 && dy > 10;
       if (dy > dismissThreshold || isFlick) {
@@ -2027,42 +2027,23 @@ void main() {
     el.addEventListener('touchstart', e => {
       bodyTouchStartY = e.touches[0].clientY;
       touchScroller = scrollerOf(e.target);
-    }, optNP);
+    }, opt);
 
     el.addEventListener('touchmove', e => {
       const y = e.touches[0].clientY;
       if (!dragging) {
         const dy = y - bodyTouchStartY;
         if (Math.abs(dy) < BODY_THRESHOLD) return;
+        // inside a scroller: pulling down only takes over at the very top, pulling up never does
         if (touchScroller && touchScroller.scrollTop > 0) return;
         beginDrag(y);
       }
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
       scheduleApply(y);
     }, optNP);
 
     el.addEventListener('touchend',    e => endDrag(e.changedTouches[0].clientY), opt);
     el.addEventListener('touchcancel', cancelDrag, opt);
-
-    // ── handle zone: direct non-passive listeners so upward stretch
-    //    always fires even if the sheet or a parent has intercepted touch
-    const handleZone = el.querySelector('.mob-sheet-handle-zone');
-    if (handleZone) {
-      handleZone.addEventListener('touchstart', e => {
-        bodyTouchStartY = e.touches[0].clientY;
-        touchScroller = null;
-      }, optNP);
-      handleZone.addEventListener('touchmove', e => {
-        const y = e.touches[0].clientY;
-        if (!dragging) {
-          const dy = y - bodyTouchStartY;
-          if (Math.abs(dy) < BODY_THRESHOLD) return;
-          beginDrag(y);
-        }
-        e.preventDefault();
-        scheduleApply(y);
-      }, optNP);
-    }
 
     // ── pointer (mouse/stylus) ──────────────────────────────
     let mousePendingY = null;
