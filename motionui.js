@@ -1903,8 +1903,8 @@ void main() {
      drawers. Works with touch and pointer (mouse/stylus).
      el            — the sheet element
      onDismiss     — called when drag-dismiss threshold reached
-     getScrollable — optional fn returning inner scrollable el
-                     (drag only starts from top of scroll)
+     getScrollable — unused, kept so signal stays the 4th arg
+                     (scroll conflicts are auto detected from the touch target)
      signal        — optional AbortSignal to remove listeners
 
      Backdrop resolution: if el was registered via
