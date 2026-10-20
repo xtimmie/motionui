@@ -1919,10 +1919,16 @@ void main() {
            document.querySelector('.mob-sheet-backdrop');
   }
 
-  function initSheetDrag(el, onDismiss, getScrollable, signal) {
-    const zone = el.querySelector('.mob-sheet-handle-zone');
-    if (!zone) return;
+  function initSheetDrag(el, onDismiss, _getScrollable, signal) {
     const BODY_THRESHOLD = 12;
+    // true if the touched element or any ancestor up to el is scrolled down
+    const scrolledDown = (t, tol) => {
+      for (let n = t; n; n = n.parentElement) {
+        if (n.scrollTop > tol) return true;
+        if (n === el) break;
+      }
+      return false;
+    };
 
     let dragging = false, startY = 0, lastY = 0, rafPending = false;
     let prevY = 0, prevT = 0, lastT = 0, velocity = 0, zk = 1;
@@ -2017,21 +2023,16 @@ void main() {
     const optS  = signal ? { signal } : {};
 
     // ── touch ──────────────────────────────────────────────
-    zone.addEventListener('touchstart', e => {
-      beginDrag(e.touches[0].clientY);
-    }, opt);
-
-    let bodyTouchStartY = 0;
+    let bodyTouchStartY = 0, touchTarget = null;
     el.addEventListener('touchstart', e => {
-      if (zone.contains(e.target)) return;
       bodyTouchStartY = e.touches[0].clientY;
+      touchTarget = e.target;
     }, opt);
 
     el.addEventListener('touchmove', e => {
       const y = e.touches[0].clientY;
       if (!dragging) {
-        const sc = getScrollable ? getScrollable() : null;
-        if (sc && sc.scrollTop > 0) return;
+        if (scrolledDown(touchTarget, 0)) return;
         if ((y - bodyTouchStartY) < BODY_THRESHOLD) return;
         beginDrag(y);
       }
@@ -2045,17 +2046,9 @@ void main() {
     // ── pointer (mouse/stylus) ──────────────────────────────
     let mousePendingY = null;
 
-    zone.addEventListener('pointerdown', e => {
-      if (e.pointerType === 'touch') return;
-      e.stopPropagation();
-      beginDrag(e.clientY);
-      el.setPointerCapture(e.pointerId);
-    }, optS);
-
     el.addEventListener('pointerdown', e => {
-      if (e.pointerType === 'touch' || zone.contains(e.target)) return;
-      const sc = getScrollable ? getScrollable() : null;
-      if (sc && sc.scrollTop > 4) return;
+      if (e.pointerType === 'touch') return;
+      if (scrolledDown(e.target, 4)) return;
       mousePendingY = e.clientY;
     }, optS);
 
