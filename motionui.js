@@ -1983,7 +1983,7 @@ void main() {
       dragging = false; rafPending = false;
       const dy = y - startY;
       console.log('[sheetdrag] end', { fingerDy: dy, sheetDy: el.getBoundingClientRect().top - el._dbgTop, zk });
-      const dismissThreshold = Math.max(60, el.offsetHeight * 0.675) / (window.visualViewport?.scale ?? 1);
+      const dismissThreshold = Math.max(60, el.offsetHeight * 0.675) * zk;
       // flick: fast downward velocity (px/ms) even with small distance
       const isFlick = velocity > 1.6 && dy > 10;
       if (dy > dismissThreshold || isFlick) {
