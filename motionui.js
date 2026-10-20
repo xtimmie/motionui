@@ -1983,9 +1983,9 @@ void main() {
       dragging = false; rafPending = false;
       const dy = y - startY;
       console.log('[sheetdrag] end', { fingerDy: dy, sheetDy: el.getBoundingClientRect().top - el._dbgTop, zk });
-      const dismissThreshold = Math.max(60, el.offsetHeight * 0.35);
+      const dismissThreshold = Math.max(60, el.offsetHeight * 0.675);
       // flick: fast downward velocity (px/ms) even with small distance
-      const isFlick = velocity > 0.4 && dy > 10;
+      const isFlick = velocity > 1.6 && dy > 10;
       if (dy > dismissThreshold || isFlick) {
         // animate slide-out then dismiss
         const remaining = el.offsetHeight - Math.max(dy, 0);
@@ -2035,7 +2035,7 @@ void main() {
         const dy = y - bodyTouchStartY;
         if (Math.abs(dy) < BODY_THRESHOLD) return;
         // inside a scroller: pulling down only takes over at the very top, pulling up never does
-        if (touchScroller && (dy < 0 || touchScroller.scrollTop > 0)) return;
+        if (touchScroller && touchScroller.scrollTop > 0) return;
         beginDrag(y);
       }
       if (e.cancelable) e.preventDefault();
