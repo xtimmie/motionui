@@ -1921,21 +1921,13 @@ void main() {
 
   function initSheetDrag(el, onDismiss, _getScrollable, signal) {
     const BODY_THRESHOLD = 12;
-    // true if the touched element or any ancestor up to el can still scroll further down (finger moving up)
-    const hasRoomBelow = (t, tol) => {
+    // nearest ancestor (up to el) that scrolls vertically, null if none
+    const scrollerOf = t => {
       for (let n = t; n; n = n.parentElement) {
-        if (n.scrollHeight - n.clientHeight - n.scrollTop > tol && /(auto|scroll)/.test(getComputedStyle(n).overflowY)) return true;
+        if (n.scrollHeight > n.clientHeight + 1 && /(auto|scroll|overlay)/.test(getComputedStyle(n).overflowY)) return n;
         if (n === el) break;
       }
-      return false;
-    };
-    // true if the touched element or any ancestor up to el is scrolled down
-    const scrolledDown = (t, tol) => {
-      for (let n = t; n; n = n.parentElement) {
-        if (n.scrollTop > tol) return true;
-        if (n === el) break;
-      }
-      return false;
+      return null;
     };
 
     let dragging = false, startY = 0, lastY = 0, rafPending = false;
@@ -2031,18 +2023,19 @@ void main() {
     const optS  = signal ? { signal } : {};
 
     // ── touch ──────────────────────────────────────────────
-    let bodyTouchStartY = 0, touchTarget = null;
+    let bodyTouchStartY = 0, touchScroller = null;
     el.addEventListener('touchstart', e => {
       bodyTouchStartY = e.touches[0].clientY;
-      touchTarget = e.target;
+      touchScroller = scrollerOf(e.target);
     }, opt);
 
     el.addEventListener('touchmove', e => {
       const y = e.touches[0].clientY;
       if (!dragging) {
-        const dir = y - bodyTouchStartY;
-        if (Math.abs(dir) < BODY_THRESHOLD) return;
-        if (dir > 0 ? scrolledDown(touchTarget, 0) : hasRoomBelow(touchTarget, 1)) return;
+        const dy = y - bodyTouchStartY;
+        if (Math.abs(dy) < BODY_THRESHOLD) return;
+        // inside a scroller: pulling down only takes over at the very top, pulling up never does
+        if (touchScroller && (dy < 0 || touchScroller.scrollTop > 0)) return;
         beginDrag(y);
       }
       if (e.cancelable) e.preventDefault();
@@ -2057,7 +2050,7 @@ void main() {
 
     el.addEventListener('pointerdown', e => {
       if (e.pointerType === 'touch') return;
-      if (scrolledDown(e.target, 4)) return;
+      if (scrollerOf(e.target)?.scrollTop > 4) return;
       mousePendingY = e.clientY;
     }, optS);
 
