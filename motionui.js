@@ -1959,7 +1959,7 @@ void main() {
       const _h = el.offsetHeight;
       const _r = _h ? el.getBoundingClientRect().height / _h : 1;
       zk = (_r > 0.25 && _r < 4) ? _r : 1;
-      el.style.transition = 'none';
+      el.style.setProperty('transition', 'none', 'important');
     }
 
     function endDrag(y) {
