@@ -1959,6 +1959,8 @@ void main() {
       const _h = el.offsetHeight;
       const _r = _h ? el.getBoundingClientRect().height / _h : 1;
       zk = (_r > 0.25 && _r < 4) ? _r : 1;
+      el._dbgTop = el.getBoundingClientRect().top;
+      console.log('[sheetdrag] begin', { zk, offsetH: _h, rectH: el.getBoundingClientRect().height, startY });
       el.style.setProperty('transition', 'none', 'important');
     }
 
@@ -1966,6 +1968,7 @@ void main() {
       if (!dragging) return;
       dragging = false; rafPending = false;
       const dy = y - startY;
+      console.log('[sheetdrag] end', { fingerDy: dy, sheetDy: el.getBoundingClientRect().top - el._dbgTop, zk });
       const dismissThreshold = Math.max(60, el.offsetHeight * 0.35);
       // flick: fast downward velocity (px/ms) even with small distance
       const isFlick = velocity > 0.4 && dy > 10;
