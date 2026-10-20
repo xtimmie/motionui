@@ -1938,9 +1938,11 @@ void main() {
       if (!dragging) return;
       const dy = lastY - startY;
       if (dy < 0) {
-        const scale = 1 + Math.abs(dy) * 0.0004;
-        el.style.transformOrigin = 'bottom';
-        el.style.transform = `scaleY(${Math.min(scale, 1.05)})`;
+        // rubber-band upward: translateY with logarithmic resistance
+        const pull = Math.abs(dy);
+        const rubber = pull / (1 + pull * 0.018);
+        el.style.transformOrigin = '';
+        el.style.transform = `translateY(${-rubber}px)`;
       } else {
         el.style.transformOrigin = '';
         el.style.transform = `translateY(${dy / zk}px)`;
