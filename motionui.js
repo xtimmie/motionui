@@ -2049,18 +2049,15 @@ void main() {
     // ── handle zone: direct non-passive listeners so upward stretch
     //    always fires even if the sheet or a parent has intercepted touch
     const handleZone = el.querySelector('.mob-sheet-handle-zone');
-    console.log('[sheetdrag] handleZone found:', !!handleZone, handleZone);
     if (handleZone) {
       handleZone.addEventListener('touchstart', e => {
         bodyTouchStartY = e.touches[0].clientY;
         touchScroller = null;
-        console.log('[sheetdrag] handleZone touchstart y=', bodyTouchStartY);
       }, optNP);
       handleZone.addEventListener('touchmove', e => {
         const y = e.touches[0].clientY;
-        const dy = y - bodyTouchStartY;
-        console.log('[sheetdrag] handleZone touchmove dy=', dy, 'dragging=', dragging, 'cancelable=', e.cancelable);
         if (!dragging) {
+          const dy = y - bodyTouchStartY;
           if (Math.abs(dy) < BODY_THRESHOLD) return;
           beginDrag(y);
         }
