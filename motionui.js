@@ -1921,6 +1921,14 @@ void main() {
 
   function initSheetDrag(el, onDismiss, _getScrollable, signal) {
     const BODY_THRESHOLD = 12;
+    // true if the touched element or any ancestor up to el can still scroll further down (finger moving up)
+    const hasRoomBelow = (t, tol) => {
+      for (let n = t; n; n = n.parentElement) {
+        if (n.scrollHeight - n.clientHeight - n.scrollTop > tol && /(auto|scroll)/.test(getComputedStyle(n).overflowY)) return true;
+        if (n === el) break;
+      }
+      return false;
+    };
     // true if the touched element or any ancestor up to el is scrolled down
     const scrolledDown = (t, tol) => {
       for (let n = t; n; n = n.parentElement) {
@@ -2032,8 +2040,9 @@ void main() {
     el.addEventListener('touchmove', e => {
       const y = e.touches[0].clientY;
       if (!dragging) {
-        if (scrolledDown(touchTarget, 0)) return;
-        if ((y - bodyTouchStartY) < BODY_THRESHOLD) return;
+        const dir = y - bodyTouchStartY;
+        if (Math.abs(dir) < BODY_THRESHOLD) return;
+        if (dir > 0 ? scrolledDown(touchTarget, 0) : hasRoomBelow(touchTarget, 1)) return;
         beginDrag(y);
       }
       if (e.cancelable) e.preventDefault();
