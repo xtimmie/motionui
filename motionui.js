@@ -1977,7 +1977,6 @@ void main() {
       const _p = (_t1 - _t0) / 100;
       zk = (_p > 0.25 && _p < 4) ? _p : 1;
       el._dbgTop = _t0;
-      console.log('[sheetdrag] begin', { zk, zkOld: _zkOld, offsetH: _h, startY });
     }
 
     function endDrag(y) {
