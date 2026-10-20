@@ -790,6 +790,8 @@ input[type='range'].slider.slider-vert::-moz-range-progress {
   display: none;
   position: fixed; inset: 0;
   background: color-mix(in oklch, var(--color-scrim) 45%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   z-index: 1400;
   opacity: 0;
   transition: opacity var(--dur-4) var(--ease-out);
