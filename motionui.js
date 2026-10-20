@@ -2027,18 +2027,18 @@ void main() {
     el.addEventListener('touchstart', e => {
       bodyTouchStartY = e.touches[0].clientY;
       touchScroller = scrollerOf(e.target);
-    }, opt);
+    }, optNP);
 
     el.addEventListener('touchmove', e => {
       const y = e.touches[0].clientY;
       if (!dragging) {
         const dy = y - bodyTouchStartY;
         if (Math.abs(dy) < BODY_THRESHOLD) return;
-        // inside a scroller: pulling down only takes over at the very top, pulling up never does
         if (touchScroller && touchScroller.scrollTop > 0) return;
         beginDrag(y);
+        if (dy < 0) el.setPointerCapture?.(e.identifier);
       }
-      if (e.cancelable) e.preventDefault();
+      e.preventDefault();
       scheduleApply(y);
     }, optNP);
 
