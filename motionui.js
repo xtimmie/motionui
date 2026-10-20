@@ -1958,10 +1958,18 @@ void main() {
       velocity = 0; prevY = y; prevT = 0; lastT = performance.now();
       const _h = el.offsetHeight;
       const _r = _h ? el.getBoundingClientRect().height / _h : 1;
-      zk = (_r > 0.25 && _r < 4) ? _r : 1;
-      el._dbgTop = el.getBoundingClientRect().top;
-      console.log('[sheetdrag] begin', { zk, offsetH: _h, rectH: el.getBoundingClientRect().height, startY });
+      const _zkOld = (_r > 0.25 && _r < 4) ? _r : 1;
       el.style.setProperty('transition', 'none', 'important');
+      const _prevT = el.style.transform;
+      el.style.transform = 'translateY(0px)';
+      const _t0 = el.getBoundingClientRect().top;
+      el.style.transform = 'translateY(100px)';
+      const _t1 = el.getBoundingClientRect().top;
+      el.style.transform = _prevT;
+      const _p = (_t1 - _t0) / 100;
+      zk = (_p > 0.25 && _p < 4) ? _p : 1;
+      el._dbgTop = _t0;
+      console.log('[sheetdrag] begin', { zk, zkOld: _zkOld, offsetH: _h, startY });
     }
 
     function endDrag(y) {
