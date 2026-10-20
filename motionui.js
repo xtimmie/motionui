@@ -2036,7 +2036,6 @@ void main() {
         if (Math.abs(dy) < BODY_THRESHOLD) return;
         if (touchScroller && touchScroller.scrollTop > 0) return;
         beginDrag(y);
-        if (dy < 0) el.setPointerCapture?.(e.identifier);
       }
       e.preventDefault();
       scheduleApply(y);
@@ -2044,6 +2043,26 @@ void main() {
 
     el.addEventListener('touchend',    e => endDrag(e.changedTouches[0].clientY), opt);
     el.addEventListener('touchcancel', cancelDrag, opt);
+
+    // ── handle zone: direct non-passive listeners so upward stretch
+    //    always fires even if the sheet or a parent has intercepted touch
+    const handleZone = el.querySelector('.mob-sheet-handle-zone');
+    if (handleZone) {
+      handleZone.addEventListener('touchstart', e => {
+        bodyTouchStartY = e.touches[0].clientY;
+        touchScroller = null; // handle zone is never inside a scroller
+      }, optNP);
+      handleZone.addEventListener('touchmove', e => {
+        const y = e.touches[0].clientY;
+        if (!dragging) {
+          const dy = y - bodyTouchStartY;
+          if (Math.abs(dy) < BODY_THRESHOLD) return;
+          beginDrag(y);
+        }
+        e.preventDefault();
+        scheduleApply(y);
+      }, optNP);
+    }
 
     // ── pointer (mouse/stylus) ──────────────────────────────
     let mousePendingY = null;
