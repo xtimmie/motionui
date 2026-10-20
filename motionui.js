@@ -247,7 +247,7 @@
     if (c) wave.style.background = c;
     target.appendChild(wave);
 
-    wave.addEventListener('animationend', () => { wave.remove(); }, { once: true });
+    wave.addEventListener('animationend', () => { observer.disconnect(); wave.remove(); }, { once: true });
 
     const waveStart = performance.now();
     // If the target is removed from DOM mid-animation, re-adopt the wave onto
