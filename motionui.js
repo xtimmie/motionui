@@ -2900,9 +2900,9 @@ void main() {
         teardown()  {},
         applyTokens() {
           const r = document.documentElement;
-          r.style.setProperty('--glass-bg',        'rgb(255 255 255 / calc(.04 * var(--glass-a,1)))');
-          r.style.setProperty('--glass-bg-mid',    'rgb(50 50 50 / calc(.40 * var(--glass-a,1)))');
-          r.style.setProperty('--glass-bg-hi',     'rgb(50 50 50 / calc(.75 * var(--glass-a,1)))');
+          r.style.setProperty('--glass-bg',        'color-mix(in oklch, var(--color-surface-container) calc(100% * var(--glass-s,0)), rgb(255 255 255 / calc(.04 * var(--glass-a,1))))');
+          r.style.setProperty('--glass-bg-mid',    'rgb(50 50 50 / max(calc(.40 * var(--glass-a,1)), var(--glass-s,0)))');
+          r.style.setProperty('--glass-bg-hi',     'rgb(50 50 50 / max(calc(.75 * var(--glass-a,1)), var(--glass-s,0)))');
           r.style.setProperty('--glass-border',    'rgba(255,255,255,0.13)');
           r.style.setProperty('--glass-border-hi', 'rgba(255,255,255,0.22)');
           r.style.setProperty('--glass-blur',      'blur(calc(12px * var(--glass-b,1))) saturate(1.4)');
@@ -3273,7 +3273,10 @@ void main() {
     setBlur,
     setGlass({ alpha, blur } = {}) {
       const r = document.documentElement;
-      if (alpha != null) r.style.setProperty('--glass-a', alpha);
+      if (alpha != null) {
+        r.style.setProperty('--glass-a', Math.min(1, alpha));
+        r.style.setProperty('--glass-s', Math.max(0, Math.min(1, alpha - 1)));
+      }
       if (blur  != null) {
         r.style.setProperty('--glass-b', blur);
         r.classList.toggle('mu-noblur', Number(blur) <= 0);
