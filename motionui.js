@@ -3274,7 +3274,10 @@ void main() {
     setGlass({ alpha, blur } = {}) {
       const r = document.documentElement;
       if (alpha != null) r.style.setProperty('--glass-a', alpha);
-      if (blur  != null) r.style.setProperty('--glass-b', blur);
+      if (blur  != null) {
+        r.style.setProperty('--glass-b', blur);
+        r.classList.toggle('mu-noblur', Number(blur) <= 0);
+      }
     },
     snackbar,
     dialog,
