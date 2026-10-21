@@ -1204,6 +1204,15 @@ void main() {
       slider.style.setProperty('--_empty-pct', emptyPct + '%');
     }
 
+    const warnAttr = slider.dataset.warnFrom;
+    if (warnAttr != null && warnAttr !== '') {
+      const warnFrac = Math.min(1, Math.max(0, (+warnAttr - min) / (max - min)));
+      const warnCx   = warnFrac * usable + THUMB_W / 2;
+      slider.style.setProperty('--_warn-w', Math.max(0, (elW - warnCx) / elW * 100).toFixed(4) + '%');
+    } else if (slider.style.getPropertyValue('--_warn-w')) {
+      slider.style.removeProperty('--_warn-w');
+    }
+
     // horizontal only: nudge thumb so it stays visually centered on the fill
     // vertical sliders must not translateX — writing-mode rotates the axis
     if (!isVert) {
