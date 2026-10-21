@@ -1580,6 +1580,13 @@ input[type='range'].slider.slider-vert::-moz-range-progress {
   border: 1px solid var(--glass-border-hi) !important;
   box-shadow: var(--glass-spec-panel) !important;
 }
+/* blur slider at 0 = no backdrop-filter at all (drops the compositor layers, not just blur(0)) */
+html[data-mu-design="glassy"].mu-noblur *,
+html[data-mu-design="glassy"].mu-noblur *::before,
+html[data-mu-design="glassy"].mu-noblur *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
 /* buttons */
 [data-mu-design="glassy"] .btn {
   box-shadow: var(--glass-spec-panel);
