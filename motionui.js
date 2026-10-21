@@ -2900,12 +2900,12 @@ void main() {
         teardown()  {},
         applyTokens() {
           const r = document.documentElement;
-          r.style.setProperty('--glass-bg',        'rgba(255,255,255,0.04)');
-          r.style.setProperty('--glass-bg-mid',    'rgba(50,50,50,0.40)');
-          r.style.setProperty('--glass-bg-hi',     'rgba(50,50,50,0.75)');
+          r.style.setProperty('--glass-bg',        'rgb(255 255 255 / calc(.04 * var(--glass-a,1)))');
+          r.style.setProperty('--glass-bg-mid',    'rgb(50 50 50 / calc(.40 * var(--glass-a,1)))');
+          r.style.setProperty('--glass-bg-hi',     'rgb(50 50 50 / calc(.75 * var(--glass-a,1)))');
           r.style.setProperty('--glass-border',    'rgba(255,255,255,0.13)');
           r.style.setProperty('--glass-border-hi', 'rgba(255,255,255,0.22)');
-          r.style.setProperty('--glass-blur',      'blur(12px) saturate(1.4)');
+          r.style.setProperty('--glass-blur',      'blur(calc(12px * var(--glass-b,1))) saturate(1.4)');
           r.style.setProperty('--glass-spec-panel','0 0 0 1px rgba(255,255,255,.09) inset,0 1px 0 rgba(255,255,255,.22) inset,inset 0 1px 8px -2px rgba(255,255,255,.14),0 -1px 0 rgba(0,0,0,.14) inset');
           r.style.setProperty('--glass-spec-hover','0 0 0 1px rgba(255,255,255,.12) inset,0 1px 0 rgba(255,255,255,.28) inset,inset 0 1px 10px -2px rgba(255,255,255,.18),0 -1px 0 rgba(0,0,0,.14) inset');
           r.style.setProperty('--glass-spec-checked','0 0 0 1px rgba(255,255,255,.14) inset,0 1px 0 rgba(255,255,255,.30) inset,inset 0 1px 10px -2px rgba(255,255,255,.22),0 -1px 0 rgba(0,0,0,.18) inset');
@@ -3271,6 +3271,11 @@ void main() {
     setBri(bri) { Palette.setBri(bri); },
     setPalette(opts) { Palette.setPalette(opts); },
     setBlur,
+    setGlass({ alpha, blur } = {}) {
+      const r = document.documentElement;
+      if (alpha != null) r.style.setProperty('--glass-a', alpha);
+      if (blur  != null) r.style.setProperty('--glass-b', blur);
+    },
     snackbar,
     dialog,
     sheet,
