@@ -98,8 +98,8 @@
     _animRaf: null,
     // animated hue arc transition — sat/bri stay fixed during animation
     animateTo(toHue) {
-      if (prefersReduced()) { this.applyTokens(toHue); return; }
-      const from  = this.currentHue;
+      if (prefersReduced()) { this.currentHue = ((toHue % 360) + 360) % 360; this.applyTokens(this.currentHue); return; }
+      const from  = this._animRaf ? this._shownHue : this.currentHue;
       const delta = ((toHue - from + 540) % 360) - 180;
       const start = performance.now(), dur = 700;
       if (this._animRaf) cancelAnimationFrame(this._animRaf);
@@ -108,6 +108,7 @@
         // ease-in-out-quad
         const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
         const h    = ((from + delta * ease) % 360 + 360) % 360;
+        this._shownHue = h;
         this.applyTokens(h);
         if (t < 1) {
           this._animRaf = requestAnimationFrame(step);
@@ -129,9 +130,14 @@
 
     setHue(hue, animate = false) {
       const h = ((hue % 360) + 360) % 360;
-      this.currentHue = h;
-      if (animate) this.animateTo(h);
-      else this.applyTokens(h, this.currentSat, this.currentBri);
+      if (animate) {
+        // currentHue stays the old hue until animateTo finishes, it needs it as the start point
+        this.animateTo(h);
+      } else {
+        if (this._animRaf) { cancelAnimationFrame(this._animRaf); this._animRaf = null; }
+        this.currentHue = h;
+        this.applyTokens(h, this.currentSat, this.currentBri);
+      }
     },
 
     setSat(sat) {
