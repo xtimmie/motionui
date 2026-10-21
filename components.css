@@ -545,6 +545,9 @@ input[type='range'].slider {
   --_thumb-w: 4px;
   --_thumb-h: 20px;
   --_gap: 8px;
+  --_warn-w: 0%;
+  --_warn-line: var(--color-error);
+  --_warn-tint: color-mix(in oklch, var(--color-error) 50%, transparent);
 
   -webkit-appearance: none; appearance: none;
   width: 100%; height: 36px;
@@ -558,12 +561,15 @@ input[type='range'].slider::-webkit-slider-runnable-track {
   height: var(--_track-h);
   border-radius: var(--radius-full);
   background-image:
+    linear-gradient(to right, var(--_warn-line, transparent) 0 2px, var(--_warn-tint, transparent) 2px 100%),
     linear-gradient(to right, var(--color-primary), var(--color-primary)),
     linear-gradient(to right, color-mix(in oklch, var(--color-primary) 20%, var(--color-surface-container-highest)), color-mix(in oklch, var(--color-primary) 20%, var(--color-surface-container-highest)));
   background-size:
+    var(--_warn-w, 0%) var(--_track-h),
     var(--_fill-pct)  var(--_track-h),
     var(--_empty-pct) var(--_track-h);
   background-position:
+    100% center,
     0 center,
     100% center;
   background-repeat: no-repeat;
@@ -618,12 +624,15 @@ input[type='range'].slider.slider-vert::-webkit-slider-runnable-track {
   height: 100%;
   border-radius: var(--radius-full);
   background-image:
+    linear-gradient(to top, var(--_warn-line, transparent) 0 2px, var(--_warn-tint, transparent) 2px 100%),
     linear-gradient(var(--color-primary), var(--color-primary)),
     linear-gradient(color-mix(in oklch, var(--color-primary) 20%, var(--color-surface-container-highest)), color-mix(in oklch, var(--color-primary) 20%, var(--color-surface-container-highest)));
   background-size:
+    var(--_track-h) var(--_warn-w, 0%),
     var(--_track-h) var(--_fill-pct),
     var(--_track-h) var(--_empty-pct);
   background-position:
+    center 0%,
     center 100%,
     center 0%;
   background-repeat: no-repeat;
@@ -1739,6 +1748,7 @@ html[data-mu-design="glassy"].mu-noblur *::after {
   border-radius: 3px;
   border: 1px solid color-mix(in oklch, var(--color-primary) 45%, black);
   background-image:
+    linear-gradient(to right, var(--_warn-line, transparent) 0 2px, var(--_warn-tint, transparent) 2px 100%),
     linear-gradient(to bottom,
       var(--_cyl-top) 0%, var(--_cyl-top) 8%,
       var(--_cyl-mid) 50%,
@@ -1749,8 +1759,8 @@ html[data-mu-design="glassy"].mu-noblur *::after {
       var(--_cyl-mid-e) 50%,
       var(--_cyl-bot-e) 100%
     );
-  background-size: var(--_fill-pct) var(--_track-h), var(--_empty-pct) var(--_track-h);
-  background-position: 0 center, 100% center;
+  background-size: var(--_warn-w, 0%) var(--_track-h), var(--_fill-pct) var(--_track-h), var(--_empty-pct) var(--_track-h);
+  background-position: 100% center, 0 center, 100% center;
   background-repeat: no-repeat;
   box-shadow: inset 0 1px 0 color-mix(in oklch, white 70%, transparent);
   transition: height 180ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
@@ -1825,13 +1835,14 @@ html[data-mu-design="glassy"].mu-noblur *::after {
     inset  1px 0 0   color-mix(in oklch, black 20%, transparent),
     inset -1px 0 0   color-mix(in oklch, white 18%, transparent);
   background-image:
+    linear-gradient(to top, var(--_warn-line, transparent) 0 2px, var(--_warn-tint, transparent) 2px 100%),
     linear-gradient(var(--color-primary), var(--color-primary)),
     linear-gradient(
       color-mix(in oklch, var(--color-primary) 20%, var(--color-surface-container-highest)),
       color-mix(in oklch, var(--color-primary) 20%, var(--color-surface-container-highest))
     );
-  background-size: var(--_track-h) var(--_fill-pct), var(--_track-h) var(--_empty-pct);
-  background-position: center 100%, center 0%;
+  background-size: var(--_track-h) var(--_warn-w, 0%), var(--_track-h) var(--_fill-pct), var(--_track-h) var(--_empty-pct);
+  background-position: center 0%, center 100%, center 0%;
 }
 [data-mu-design="glassy"] input[type='range'].slider.slider-vert::-webkit-slider-thumb {
   width: var(--_thumb-h);
