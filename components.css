@@ -1198,9 +1198,9 @@ input[type='range'].slider.slider-vert::-moz-range-progress {
 .mu-ctx-sheet .mu-ctx-sep { margin: 4px 0; }
 /* design overrides */
 [data-mu-design="glassy"] .mu-ctx {
-  background: color-mix(in oklch, var(--color-surface-container-highest) 50%, transparent) !important;
-  backdrop-filter: blur(20px) saturate(1.6);
-  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  background: color-mix(in oklch, var(--color-surface-container-highest) min(100%, calc(50% * var(--glass-a,1))), transparent) !important;
+  backdrop-filter: blur(calc(20px * var(--glass-b,1))) saturate(1.6);
+  -webkit-backdrop-filter: blur(calc(20px * var(--glass-b,1))) saturate(1.6);
   border-color: var(--glass-border-hi) !important;
   box-shadow: var(--glass-spec-panel) !important;
 }
@@ -1575,8 +1575,8 @@ input[type='range'].slider.slider-vert::-moz-range-progress {
 }
 [data-mu-design="glassy"] [data-mu-sheet] > *,
 [data-mu-design="glassy"] [data-mu-dialog] {
-  background: color-mix(in oklch, var(--color-surface-container) 75%, transparent) !important;
-  backdrop-filter: blur(22px) saturate(1.6); -webkit-backdrop-filter: blur(22px) saturate(1.6);
+  background: color-mix(in oklch, var(--color-surface-container) min(100%, calc(75% * var(--glass-a,1))), transparent) !important;
+  backdrop-filter: blur(calc(22px * var(--glass-b,1))) saturate(1.6); -webkit-backdrop-filter: blur(calc(22px * var(--glass-b,1))) saturate(1.6);
   border: 1px solid var(--glass-border-hi) !important;
   box-shadow: var(--glass-spec-panel) !important;
 }
