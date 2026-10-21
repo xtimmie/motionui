@@ -3084,6 +3084,7 @@ void main() {
     label            = 'syncing…',
     doneLabel        = null,   // shown after sync; null = hide immediately
     indeterminate    = false,  // start as chase animation; setProgress() switches to determinate
+    mount            = null,   // element/selector to append the bar into (default: inserted before scrollEl)
   } = {}) {
     const el     = typeof scrollEl === 'string' ? document.querySelector(scrollEl) : scrollEl;
     const MAX_H  = barHeight * 1.5;
@@ -3100,7 +3101,8 @@ void main() {
       <div class="mu-ptr-fr"></div>
       <div class="mu-ptr-fp"></div>
       <div class="mu-ptr-txt">pull to sync</div>`;
-    el.parentNode.insertBefore(bar, el);
+    const host = typeof mount === 'string' ? document.querySelector(mount) : mount;
+    if (host) host.appendChild(bar); else el.parentNode.insertBefore(bar, el);
 
     const fl  = bar.querySelector('.mu-ptr-fl');
     const fr  = bar.querySelector('.mu-ptr-fr');
