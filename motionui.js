@@ -97,11 +97,11 @@
 
     _animRaf: null,
     // animated hue arc transition — sat/bri stay fixed during animation
-    animateTo(toHue) {
+    animateTo(toHue, dur = 700) {
       if (prefersReduced()) { this.currentHue = ((toHue % 360) + 360) % 360; this.applyTokens(this.currentHue); return; }
       const from  = this._animRaf ? this._shownHue : this.currentHue;
       const delta = ((toHue - from + 540) % 360) - 180;
-      const start = performance.now(), dur = 700;
+      const start = performance.now();
       if (this._animRaf) cancelAnimationFrame(this._animRaf);
       const step = now => {
         const t    = Math.min((now - start) / dur, 1);
@@ -132,7 +132,8 @@
       const h = ((hue % 360) + 360) % 360;
       if (animate) {
         // currentHue stays the old hue until animateTo finishes, it needs it as the start point
-        this.animateTo(h);
+        // animate can be true (700ms) or a number of ms
+        this.animateTo(h, typeof animate === 'number' ? animate : 700);
       } else {
         if (this._animRaf) { cancelAnimationFrame(this._animRaf); this._animRaf = null; }
         this.currentHue = h;
