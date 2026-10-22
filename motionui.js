@@ -103,8 +103,11 @@
       const delta = ((toHue - from + 540) % 360) - 180;
       const start = performance.now();
       if (this._animRaf) cancelAnimationFrame(this._animRaf);
+      this._lastStep = 0;
       const step = now => {
         const t    = Math.min((now - start) / dur, 1);
+        if (t < 1 && now - this._lastStep < 33) { this._animRaf = requestAnimationFrame(step); return; }
+        this._lastStep = now;
         // ease-in-out-quad
         const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
         const h    = ((from + delta * ease) % 360 + 360) % 360;
