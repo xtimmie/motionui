@@ -35,7 +35,7 @@
 
     // sat: 0–100 (50 = normal). scales oklch chroma proportionally.
     // bri: 0.5–2.0 (1.0 = normal). scales oklch lightness and surface lightness.
-    applyTokens(hue, sat, bri) {
+    applyTokens(hue, sat, bri, anim) {
       const h   = ((hue % 360) + 360) % 360;
       const hs  = ((h + 60)  % 360);
       const ht  = ((h + 120) % 360);
@@ -92,7 +92,7 @@
       set('--color-gradient-end',       o(76, 0.09, hs));
 
       syncBlobScenes();
-      document.dispatchEvent(new CustomEvent('mu:themechange', { detail: { hue: h, sat: sv, bri: bv } }));
+      document.dispatchEvent(new CustomEvent('mu:themechange', { detail: { hue: h, sat: sv, bri: bv, anim: !!anim } }));
     },
 
     _animRaf: null,
@@ -109,7 +109,7 @@
         const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
         const h    = ((from + delta * ease) % 360 + 360) % 360;
         this._shownHue = h;
-        this.applyTokens(h);
+        this.applyTokens(h, undefined, undefined, t < 1);
         if (t < 1) {
           this._animRaf = requestAnimationFrame(step);
         } else {
@@ -122,6 +122,7 @@
     },
 
     setPalette({ hue, sat, bri } = {}) {
+      if ((hue === undefined || hue === null) && (sat === undefined || sat === null || sat === this.currentSat) && (bri === undefined || bri === null || bri === this.currentBri)) return;
       if (hue !== undefined && hue !== null) this.currentHue = ((hue % 360) + 360) % 360;
       if (sat !== undefined && sat !== null) this.currentSat = sat;
       if (bri !== undefined && bri !== null) this.currentBri = bri;
@@ -1289,7 +1290,8 @@ void main() {
     });
   }
 
-  document.addEventListener('mu:themechange', () => {
+  document.addEventListener('mu:themechange', (e) => {
+    if (e.detail && e.detail.anim) return;
     document.querySelectorAll('input[type="range"].slider').forEach(updateSlider);
   });
 
@@ -2001,7 +2003,7 @@ void main() {
       console.log('[sheetdrag] end', { fingerDy: dy, sheetDy: el.getBoundingClientRect().top - el._dbgTop, zk });
       const dismissThreshold = Math.max(60, el.offsetHeight * 0.4) * zk;
       // flick: fast downward velocity (px/ms) even with small distance
-      const isFlick = velocity > 1.6 && dy > 10;
+      const isFlick = velocity > 1 && dy > 10;
       if (dy > dismissThreshold || isFlick) {
         // animate slide-out then dismiss
         const remaining = el.offsetHeight - Math.max(dy, 0);
