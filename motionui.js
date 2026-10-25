@@ -1952,7 +1952,7 @@ void main() {
     };
 
     let dragging = false, startY = 0, lastY = 0, rafPending = false;
-    let prevY = 0, prevT = 0, lastT = 0, velocity = 0, zk = 1;
+    let prevY = 0, prevT = 0, lastT = 0, velocity = 0, zk = 1, elH = 1;
 
     function applyDrag() {
       rafPending = false;
@@ -1968,7 +1968,7 @@ void main() {
       }
       // fade this drawer's own backdrop (stacked-aware)
       const bd = resolveBackdrop(el);
-      if (bd) bd.style.opacity = dy > 0 ? String(Math.max(0, 1 - dy / (el.offsetHeight * 0.6))) : '1';
+      if (bd) bd.style.opacity = dy > 0 ? String(Math.max(0, 1 - dy / (elH * 0.6))) : '1';
     }
 
     function scheduleApply(y) {
@@ -1995,15 +1995,15 @@ void main() {
       el.style.transform = _prevT;
       const _p = (_t1 - _t0) / 100;
       zk = (_p > 0.25 && _p < 4) ? _p : 1;
-      el._dbgTop = _t0;
-      console.log('[sheetdrag] begin', { zk, zkOld: _zkOld, offsetH: _h, startY });
+      elH = _h;
+      const bd = resolveBackdrop(el);
+      if (bd) bd.style.transition = 'none'; // css opacity transition would trail the finger
     }
 
     function endDrag(y) {
       if (!dragging) return;
       dragging = false; rafPending = false;
       const dy = y - startY;
-      console.log('[sheetdrag] end', { fingerDy: dy, sheetDy: el.getBoundingClientRect().top - el._dbgTop, zk });
       const dismissThreshold = Math.max(60, el.offsetHeight * 0.4) * zk;
       // flick: fast downward velocity (px/ms) even with small distance
       const isFlick = velocity > 1 && dy > 10;
@@ -2026,7 +2026,7 @@ void main() {
         el.style.transformOrigin = 'bottom';
         el.style.transform = '';
         const bd = resolveBackdrop(el);
-        if (bd) bd.style.opacity = '';
+        if (bd) { bd.style.transition = ''; bd.style.opacity = ''; }
         const cleanup = () => { el.style.transformOrigin = ''; el.removeEventListener('transitionend', cleanup); };
         el.addEventListener('transitionend', cleanup);
       }
@@ -2036,7 +2036,7 @@ void main() {
       dragging = false; rafPending = false;
       el.style.transition = ''; el.style.transform = ''; el.style.transformOrigin = '';
       const bd = resolveBackdrop(el);
-      if (bd) bd.style.opacity = '';
+      if (bd) { bd.style.transition = ''; bd.style.opacity = ''; }
     }
 
     const opt   = signal ? { passive: true,  signal } : { passive: true };
