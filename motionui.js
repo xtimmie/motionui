@@ -3241,12 +3241,12 @@ void main() {
     el.addEventListener('pointerdown', e => {
       if (e.pointerType === 'touch' || e.button !== 0 || !canStart()) return;
       startY = e.clientY; curDrag = 0; active = true; pid = e.pointerId;
-      el.setPointerCapture(e.pointerId);
       raf = requestAnimationFrame(dragLoop);
     });
     el.addEventListener('pointermove', e => {
       if (e.pointerType === 'touch' || !active || e.pointerId !== pid) return;
       curDrag = Math.max(0, e.clientY - startY);
+      if (curDrag > 4 && !el.hasPointerCapture(pid)) el.setPointerCapture(pid);
     });
     el.addEventListener('pointerup', e => {
       if (e.pointerType === 'touch' || !active || e.pointerId !== pid) return;
