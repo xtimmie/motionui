@@ -1685,6 +1685,14 @@ html[data-mu-design="glassy"].mu-noblur *::after {
 [data-mu-design="glassy"] .mu-ripple:has(> textarea.inp:focus) {
   box-shadow: var(--glass-spec-focused);
 }
+/* native dropdown lists take their background from the option elements, the translucent select bg above would show as white */
+[data-mu-design="glassy"] select option,
+[data-mu-design="glassy"] select optgroup,
+body.design-glassy select option,
+body.design-glassy select optgroup {
+  background: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+}
 /* skeletons */
 [data-mu-design="glassy"] .skeleton-card,
 [data-mu-design="glassy"] .skeleton-rect {
