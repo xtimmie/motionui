@@ -1952,6 +1952,7 @@ void main() {
     };
 
     let dragging = false, startY = 0, lastY = 0, rafPending = false;
+    let dismissing = false; // slide-out in flight: ignore new drags and cancels until it settles
     let prevY = 0, prevT = 0, lastT = 0, velocity = 0, zk = 1, elH = 1;
 
     function applyDrag() {
@@ -1981,6 +1982,7 @@ void main() {
     }
 
     function beginDrag(y) {
+      if (dismissing) return;
       dragging = true; startY = y; lastY = y; rafPending = false;
       velocity = 0; prevY = y; prevT = 0; lastT = performance.now();
       const _h = el.offsetHeight;
@@ -2016,11 +2018,24 @@ void main() {
         el.style.transform = `translateY(${el.offsetHeight}px)`;
         const bd = resolveBackdrop(el);
         if (bd) { bd.style.transition = `opacity ${dur}ms`; bd.style.opacity = '0'; }
-        setTimeout(() => {
+        dismissing = true;
+        let settled = false;
+        const settle = () => {
+          if (settled) return;
+          settled = true;
+          el.removeEventListener('transitionend', onEnd);
+          // land on the hidden state with transitions off, so no frame can show the sheet
+          // between the inline slide-out and the sheet's own hidden styles
+          el.style.setProperty('transition', 'none', 'important');
+          onDismiss();
+          void el.offsetHeight;
           el.style.transition = ''; el.style.transform = ''; el.style.transformOrigin = '';
           if (bd) bd.style.transition = '';
-          onDismiss();
-        }, dur);
+          dismissing = false;
+        };
+        const onEnd = ev => { if (ev.target === el && ev.propertyName === 'transform') settle(); };
+        el.addEventListener('transitionend', onEnd);
+        setTimeout(settle, dur + 150); // fallback if transitionend never fires (interrupted, reduced motion)
       } else {
         el.style.transition = '';
         el.style.transformOrigin = 'bottom';
@@ -2033,6 +2048,7 @@ void main() {
     }
 
     function cancelDrag() {
+      if (dismissing) return;
       dragging = false; rafPending = false;
       el.style.transition = ''; el.style.transform = ''; el.style.transformOrigin = '';
       const bd = resolveBackdrop(el);
