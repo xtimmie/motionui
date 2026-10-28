@@ -3377,7 +3377,8 @@ void main() {
       let k = clamp(p.mapRes, .1, 1);
       if (p.maxMapPx > 0) k = Math.min(k, Math.sqrt(p.maxMapPx / (w * h)));
       const mw = Math.max(2, Math.ceil(w * k)), mh = Math.max(2, Math.ceil(h * k));
-      const key = [w, h, R.join(','), p.profile, p.ior, p.thick, p.bevel.toFixed(2), p.edgePow, p.invert ? 1 : 0, mw, mh].join('|');
+      const K = Math.max(1, R.k || 2);
+      const key = [w, h, R.join(','), K, p.profile, p.ior, p.thick, p.bevel.toFixed(2), p.edgePow, p.invert ? 1 : 0, mw, mh].join('|');
       let m = mcache.get(key);
       if (m) { mcache.delete(key); mcache.set(key, m); return m; }
       const t0 = performance.now();
@@ -3388,10 +3389,17 @@ void main() {
         const px = (x + .5) / mw * w - hw, py = (y + .5) / mh * h - hh;
         const r = px < 0 ? (py < 0 ? R[0] : R[3]) : (py < 0 ? R[1] : R[2]);
         const qx = Math.abs(px) - (hw - r), qy = Math.abs(py) - (hh - r), sx = px < 0 ? -1 : 1, sy = py < 0 ? -1 : 1;
-        const dist = -(Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r);
-        let nx, ny;
-        if (qx > 0 && qy > 0) { const l = Math.hypot(qx, qy) || 1; nx = sx * qx / l; ny = sy * qy / l; }
-        else if (qx > qy) { nx = sx; ny = 0; } else { nx = 0; ny = sy; }
+        let dist, nx, ny;
+        if (qx > 0 && qy > 0) {
+          // superellipse corner |x|^K + |y|^K = r^K (K=2 round, K=4 squircle), first order distance and gradient normal
+          const ex = Math.max(qx, 1e-6) ** (K - 1), ey = Math.max(qy, 1e-6) ** (K - 1), gl = Math.hypot(ex, ey) || 1;
+          const nm = (Math.max(qx, 1e-6) * ex + Math.max(qy, 1e-6) * ey) ** (1 / K);
+          dist = (r - nm) / (gl / (nm ** (K - 1) || 1));
+          nx = sx * ex / gl; ny = sy * ey / gl;
+        } else {
+          dist = r - Math.max(qx, qy);
+          if (qx > qy) { nx = sx; ny = 0; } else { nx = 0; ny = sy; }
+        }
         let t = Math.min(1, Math.max(0, dist / bw)); if (ep !== 1) t = t ** ep;
         const mg = L[Math.min(127, t * 127 | 0)], dx = clamp(-nx * mg * inv, -1, 1), dy = clamp(-ny * mg * inv, -1, 1), i = (y * mw + x) * 4;
         D[i] = 127.5 + 127.5 * dx; D[i + 1] = 127.5 + 127.5 * dy; D[i + 2] = 128; D[i + 3] = 255;
@@ -3439,11 +3447,15 @@ void main() {
     }
     function radii(el, w, h) {
       const cs = getComputedStyle(el), m = Math.min(w, h) / 2;
-      return ['TopLeft', 'TopRight', 'BottomRight', 'BottomLeft'].map(c => {
+      const R = ['TopLeft', 'TopRight', 'BottomRight', 'BottomLeft'].map(c => {
         const s = cs['border' + c + 'Radius'] || ''; let r = parseFloat(s) || 0;
         if (s.includes('%')) r = r / 100 * Math.min(w, h);
         return Math.min(r, m);
       });
+      // corner-shape: round = 2, squircle = superellipse(2) = 4, superellipse(n) = 2^n, bevel = 1
+      const cn = (cs.getPropertyValue('corner-shape') || '').trim(), se = cn.match(/superellipse\(\s*(-?[\d.]+)/);
+      R.k = /squircle/.test(cn) ? 4 : se ? 2 ** +se[1] : /bevel/.test(cn) ? 1 : 2;
+      return R;
     }
     function resolve(it, w, h) {
       const p = { ...DEF, ...S.params, ...(it.own || {}) }, mh = Math.min(w, h) / 2;
