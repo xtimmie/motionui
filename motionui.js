@@ -121,9 +121,6 @@
       const _enc = v => v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
       const _dec = v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
       const _gA = _cA.map(_enc), _gB = _cB.map(_enc);
-      const _enc = v => v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
-      const _dec = v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
-      const _gA = _cA.map(_enc), _gB = _cB.map(_enc);
       const [_h0, _f0] = _lin2hc(_cA), [_h1, _f1] = _lin2hc(_cB);
       const _e0 = _angD(_h0, from), _e1 = _angD(_h1, toHue);
       let _lastH = from;
@@ -3492,23 +3489,17 @@ void main() {
       return it;
     }
     // light refresh: re-reads css and rewrites inline filters, maps come from cache unless the params changed
-    function refresh() { if (S.raf) return; S.raf = requestAnimationFrame(() => { S.raf = 0; for (const it of [...S.items]) apply(it); }); }
+    function refresh() { if (S.raf) return; S.raf = requestAnimationFrame(() => { S.raf = 0; const l = [...S.items]; for (const it of l) { it.el.style.removeProperty('backdrop-filter'); it.el.style.removeProperty('-webkit-backdrop-filter'); } for (const it of l) apply(it); }); }
     function refreshPreviews() { if (S.rp) return; S.rp = requestAnimationFrame(() => { S.rp = 0; for (const it of [...S.items]) if (!it.group) apply(it); }); }
 
+    function scan() {
+      for (const g of S.groups.values()) if (g.enabled && g.selector) document.querySelectorAll(g.selector).forEach(el => { if (!byEl.has(el)) track(el, { group: g.key }); });
+      for (const it of [...S.items]) if (!it.el.isConnected) drop(it);
+    }
     function watch(on) {
-      if (!on) { if (S.mo) { S.mo.disconnect(); S.mo = null; } return; }
+      if (!on) { if (S.mo) { S.mo.disconnect(); S.mo = null; } if (S.sc) cancelAnimationFrame(S.sc); S.sc = 0; return; }
       if (S.mo) return;
-      S.mo = new MutationObserver(recs => {
-        const gs = [...S.groups.values()].filter(g => g.enabled && g.selector);
-        for (const r of recs) for (const n of r.addedNodes) {
-          if (n.nodeType !== 1) continue;
-          for (const g of gs) {
-            if (n.matches(g.selector)) track(n, { group: g.key });
-            if (n.firstElementChild) n.querySelectorAll(g.selector).forEach(el => track(el, { group: g.key }));
-          }
-        }
-        for (const it of [...S.items]) if (!it.el.isConnected) drop(it);
-      });
+      S.mo = new MutationObserver(() => { if (!S.sc) S.sc = requestAnimationFrame(() => { S.sc = 0; scan(); }); });
       S.mo.observe(document.body, { childList: true, subtree: true });
     }
     function doSync() {
@@ -3519,7 +3510,11 @@ void main() {
     }
     function sync() { if (S.sq) return; S.sq = requestAnimationFrame(() => { S.sq = 0; doSync(); }); }
 
-    if (supported) document.addEventListener('mu:designchange', () => setTimeout(refresh, 60));
+    if (supported) {
+      document.addEventListener('mu:designchange', () => setTimeout(refresh, 60));
+      let ht = 0;
+      new MutationObserver(() => { clearTimeout(ht); ht = setTimeout(refresh, 120); }).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-mu-design'] });
+    }
 
     return {
       supported, defaults: { ...DEF }, looks: LOOKS,
@@ -3583,7 +3578,7 @@ void main() {
         const fx = [GlassFx.b !== 1 ? `brightness(${GlassFx.b})` : '', GlassFx.c !== 1 ? `contrast(${GlassFx.c})` : ''].filter(Boolean).join(' ');
         if (fx) r.style.setProperty('--glass-fx', fx); else r.style.removeProperty('--glass-fx');
       }
-      LiquidGlass.refresh();
+      // LiquidGlass re-reads root class/style on its own (debounced)
       if (alpha != null) {
         r.style.setProperty('--glass-a', Math.min(1, alpha));
         r.style.setProperty('--glass-s', Math.max(0, Math.min(1, alpha - 1)));
