@@ -104,7 +104,23 @@
       if (prefersReduced()) { this.currentHue = ((toHue % 360) + 360) % 360; this.currentSat = satTo; this.applyTokens(this.currentHue); return; }
       const from  = this._animRaf ? this._shownHue : this.currentHue;
       const fromSat = this._animRaf ? (this._shownSat ?? this.currentSat) : this.currentSat;
-      const delta = ((toHue - from + 540) % 360) - 180;
+      const _ref = hh => {
+        const r = hh * Math.PI / 180, L = 0.78, C = 0.16, a = C * Math.cos(r), b = C * Math.sin(r);
+        const l = Math.pow(L + 0.3963377774*a + 0.2158037573*b, 3), m = Math.pow(L - 0.1055613458*a - 0.0638541728*b, 3), s = Math.pow(L - 0.0894841775*a - 1.291485548*b, 3);
+        return [4.0767416621*l - 3.3077115913*m + 0.2309699292*s, -1.2684380046*l + 2.6097574011*m - 0.3413193965*s, -0.0041960863*l - 0.7034186147*m + 1.707614701*s].map(v => Math.max(0, Math.min(1, v)));
+      };
+      const _lin2hc = c => {
+        const l = Math.cbrt(0.4122214708*c[0] + 0.5363325363*c[1] + 0.0514459929*c[2]);
+        const m = Math.cbrt(0.2119034982*c[0] + 0.6806995451*c[1] + 0.1073969566*c[2]);
+        const s = Math.cbrt(0.0883024619*c[0] + 0.2817188376*c[1] + 0.6299787005*c[2]);
+        const a = 1.9779984951*l - 2.428592205*m + 0.4505937099*s, b = 0.0259040371*l + 0.7827717662*m - 0.808675766*s;
+        return [Math.atan2(b, a) * 180 / Math.PI, Math.hypot(a, b) / 0.16];
+      };
+      const _angD = (x, y) => ((x - y + 540) % 360) - 180;
+      const _cA = _ref(from), _cB = _ref(toHue);
+      const [_h0, _f0] = _lin2hc(_cA), [_h1, _f1] = _lin2hc(_cB);
+      const _e0 = _angD(_h0, from), _e1 = _angD(_h1, toHue);
+      let _lastH = from;
       const start = performance.now();
       if (this._animRaf) cancelAnimationFrame(this._animRaf);
       this._lastStep = 0;
@@ -114,8 +130,13 @@
         this._lastStep = now;
         // ease-in-out-quad
         const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-        const h    = ((from + delta * ease) % 360 + 360) % 360;
-        const sv   = fromSat + (satTo - fromSat) * ease;
+        const mix  = _cA.map((v, i) => v + (_cB[i] - v) * ease);
+        const [mh, mf] = _lin2hc(mix);
+        const corr = _e0 * (1 - ease) + _e1 * ease;
+        const h    = mf > 1e-3 ? (((mh - corr) % 360) + 360) % 360 : _lastH;
+        _lastH = h;
+        const fac  = mf / Math.max(1e-3, _f0 * (1 - ease) + _f1 * ease);
+        const sv   = (fromSat + (satTo - fromSat) * ease) * Math.min(1.3, fac);
         this._shownHue = h;
         this._shownSat = sv;
         this.applyTokens(h, sv, undefined, t < 1);
