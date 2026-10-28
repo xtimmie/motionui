@@ -118,6 +118,9 @@
       };
       const _angD = (x, y) => ((x - y + 540) % 360) - 180;
       const _cA = _ref(from), _cB = _ref(toHue);
+      const _enc = v => v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+      const _dec = v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      const _gA = _cA.map(_enc), _gB = _cB.map(_enc);
       const [_h0, _f0] = _lin2hc(_cA), [_h1, _f1] = _lin2hc(_cB);
       const _e0 = _angD(_h0, from), _e1 = _angD(_h1, toHue);
       let _lastH = from;
@@ -130,7 +133,7 @@
         this._lastStep = now;
         // ease-in-out-quad
         const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-        const mix  = _cA.map((v, i) => v + (_cB[i] - v) * ease);
+        const mix  = _gA.map((v, i) => _dec(v + (_gB[i] - v) * ease));
         const [mh, mf] = _lin2hc(mix);
         const corr = _e0 * (1 - ease) + _e1 * ease;
         const h    = mf > 1e-3 ? (((mh - corr) % 360) + 360) % 360 : _lastH;
