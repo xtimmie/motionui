@@ -97,9 +97,13 @@
 
     _animRaf: null,
     // animated hue arc transition — sat/bri stay fixed during animation
-    animateTo(toHue, dur = 700) {
-      if (prefersReduced()) { this.currentHue = ((toHue % 360) + 360) % 360; this.applyTokens(this.currentHue); return; }
+    // toSat (optional): sat animates in the same loop as the hue, calling setSat mid-animation
+    // would apply tokens with the old currentHue and flicker
+    animateTo(toHue, dur = 700, toSat) {
+      const satTo = (toSat === undefined || toSat === null) ? this.currentSat : toSat;
+      if (prefersReduced()) { this.currentHue = ((toHue % 360) + 360) % 360; this.currentSat = satTo; this.applyTokens(this.currentHue); return; }
       const from  = this._animRaf ? this._shownHue : this.currentHue;
+      const fromSat = this._animRaf ? (this._shownSat ?? this.currentSat) : this.currentSat;
       const delta = ((toHue - from + 540) % 360) - 180;
       const start = performance.now();
       if (this._animRaf) cancelAnimationFrame(this._animRaf);
@@ -111,13 +115,16 @@
         // ease-in-out-quad
         const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
         const h    = ((from + delta * ease) % 360 + 360) % 360;
+        const sv   = fromSat + (satTo - fromSat) * ease;
         this._shownHue = h;
-        this.applyTokens(h, undefined, undefined, t < 1);
+        this._shownSat = sv;
+        this.applyTokens(h, sv, undefined, t < 1);
         if (t < 1) {
           this._animRaf = requestAnimationFrame(step);
         } else {
           this._animRaf = null;
           this.currentHue = ((toHue % 360) + 360) % 360;
+          this.currentSat = satTo;
           this.applyTokens(this.currentHue);
         }
       };
@@ -132,15 +139,16 @@
       this.applyTokens(this.currentHue, this.currentSat, this.currentBri);
     },
 
-    setHue(hue, animate = false) {
+    setHue(hue, animate = false, toSat) {
       const h = ((hue % 360) + 360) % 360;
       if (animate) {
         // currentHue stays the old hue until animateTo finishes, it needs it as the start point
         // animate can be true (700ms) or a number of ms
-        this.animateTo(h, typeof animate === 'number' ? animate : 700);
+        this.animateTo(h, typeof animate === 'number' ? animate : 700, toSat);
       } else {
         if (this._animRaf) { cancelAnimationFrame(this._animRaf); this._animRaf = null; }
         this.currentHue = h;
+        if (toSat !== undefined && toSat !== null) this.currentSat = toSat;
         this.applyTokens(h, this.currentSat, this.currentBri);
       }
     },
@@ -3303,7 +3311,7 @@ void main() {
     getDesign()      { return Design.getDesign(); },
     designs()        { return Design.getDesigns(); },
     get currentDesign() { return Design.current; },
-    setHue(hue, animate = true) { Palette.setHue(hue, animate); },
+    setHue(hue, animate = true, sat) { Palette.setHue(hue, animate, sat); },
     setSat(sat) { Palette.setSat(sat); },
     setBri(bri) { Palette.setBri(bri); },
     setPalette(opts) { Palette.setPalette(opts); },
