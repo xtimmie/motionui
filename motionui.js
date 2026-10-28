@@ -3030,7 +3030,7 @@ void main() {
           const oc  = c => +(c * cm).toFixed(4);
           // phosphor glow color — vivid primary at current hue
           const glowL  = Math.min(0.88, 0.72 + (sat / 100) * 0.16);
-          const glowC  = Math.min(0.30, 0.18 + (sat / 100) * 0.10);
+          const glowC  = Math.min(0.30, 0.23 * cm);
           const glow   = `oklch(${(glowL * 100).toFixed(1)}% ${glowC.toFixed(3)} ${hue})`;
           const glowDim= `oklch(${(glowL * 0.72 * 100).toFixed(1)}% ${(glowC * 0.8).toFixed(3)} ${hue})`;
           // bg/surface: near-black tinted at current hue
