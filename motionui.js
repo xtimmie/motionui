@@ -133,10 +133,14 @@
 
     setPalette({ hue, sat, bri } = {}) {
       if ((hue === undefined || hue === null) && (sat === undefined || sat === null || sat === this.currentSat) && (bri === undefined || bri === null || bri === this.currentBri)) return;
-      if (hue !== undefined && hue !== null) this.currentHue = ((hue % 360) + 360) % 360;
+      if (hue !== undefined && hue !== null) {
+        if (this._animRaf) { cancelAnimationFrame(this._animRaf); this._animRaf = null; }
+        this.currentHue = ((hue % 360) + 360) % 360;
+      }
       if (sat !== undefined && sat !== null) this.currentSat = sat;
       if (bri !== undefined && bri !== null) this.currentBri = bri;
-      this.applyTokens(this.currentHue, this.currentSat, this.currentBri);
+      const live = !!this._animRaf;
+      this.applyTokens(live ? this._shownHue : this.currentHue, live ? (this._shownSat ?? this.currentSat) : this.currentSat, this.currentBri, live);
     },
 
     setHue(hue, animate = false, toSat) {
