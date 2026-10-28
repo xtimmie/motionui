@@ -121,6 +121,9 @@
       const _enc = v => v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
       const _dec = v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
       const _gA = _cA.map(_enc), _gB = _cB.map(_enc);
+      const _enc = v => v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+      const _dec = v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      const _gA = _cA.map(_enc), _gB = _cB.map(_enc);
       const [_h0, _f0] = _lin2hc(_cA), [_h1, _f1] = _lin2hc(_cB);
       const _e0 = _angD(_h0, from), _e1 = _angD(_h1, toHue);
       let _lastH = from;
@@ -2978,7 +2981,7 @@ void main() {
           r.style.setProperty('--glass-bg-hi',     'rgb(50 50 50 / max(calc(.75 * var(--glass-a,1)), var(--glass-s,0)))');
           r.style.setProperty('--glass-border',    'rgba(255,255,255,0.13)');
           r.style.setProperty('--glass-border-hi', 'rgba(255,255,255,0.22)');
-          r.style.setProperty('--glass-blur',      'blur(calc(12px * var(--glass-b,1))) saturate(1.4)');
+          r.style.setProperty('--glass-blur',      'blur(calc(12px * var(--glass-b,1))) saturate(var(--glass-sat,1.4)) var(--glass-fx,)');
           r.style.setProperty('--glass-spec-panel','0 0 0 1px rgba(255,255,255,.09) inset,0 1px 0 rgba(255,255,255,.22) inset,inset 0 1px 8px -2px rgba(255,255,255,.14),0 -1px 0 rgba(0,0,0,.14) inset');
           r.style.setProperty('--glass-spec-hover','0 0 0 1px rgba(255,255,255,.12) inset,0 1px 0 rgba(255,255,255,.28) inset,inset 0 1px 10px -2px rgba(255,255,255,.18),0 -1px 0 rgba(0,0,0,.14) inset');
           r.style.setProperty('--glass-spec-checked','0 0 0 1px rgba(255,255,255,.14) inset,0 1px 0 rgba(255,255,255,.30) inset,inset 0 1px 10px -2px rgba(255,255,255,.22),0 -1px 0 rgba(0,0,0,.18) inset');
@@ -3326,6 +3329,231 @@ void main() {
     };
   }
 
+  /* ─────────────────────────────────────────────────────────
+     LIQUID GLASS — displacement refraction for backdrop-filter panels
+     opt-in (MU.liquidGlass.enable). appends url(#filter) to whatever backdrop-filter an
+     element already has, so css blur/saturate/brightness stay as they are.
+     MU.liquidGlass: enable(on) · configure({params, quality}) · group(key,{selector,enabled})
+       attach(el,{params}) · mountPreviews(root) · refresh() · stats() · looks · defaults
+     ───────────────────────────────────────────────────────── */
+  const GlassFx = { b: 1, c: 1 };
+  const LiquidGlass = (() => {
+    const NS = 'http://www.w3.org/2000/svg';
+    const supported = !!(window.CSS && CSS.supports && CSS.supports('backdrop-filter', 'url(#a)')) && typeof ResizeObserver !== 'undefined';
+    const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    // bevel/scale are % of the panel's half size when relBevel/relScale (capped by maxBevel/maxScale px), else px
+    const DEF = {
+      profile: 'squircle', ior: 1.5, thick: 1.5, edgePow: 1, invert: false,
+      bevel: 92, relBevel: true, maxBevel: 100,
+      scale: 89, relScale: true, maxScale: 80,
+      mapRes: 1, maxMapPx: 160000, maxArea: 0,
+    };
+    const LOOKS = {
+      panel:     {},
+      soft:      { thick: .9, bevel: 70, scale: 35 },
+      dome:      { profile: 'convex', ior: 1.6, thick: 2.2, bevel: 100, scale: 100 },
+      lip:       { profile: 'lip', thick: 1.8, bevel: 45, scale: 60 },
+      concave:   { profile: 'concave', thick: 1.2, bevel: 70, scale: 50 },
+      reference: { relBevel: false, bevel: 83, relScale: false, scale: 80 },
+    };
+    const S = { on: false, params: {}, q: 0, groups: new Map(), items: new Set(), host: null, uid: 0, mo: null, raf: 0, rp: 0, sq: 0, gt: 0, lastMs: 0 };
+    const byEl = new WeakMap(), mcache = new Map(), lcache = new Map();
+
+    function lut(v) {
+      const key = v.profile + '|' + v.ior + '|' + v.thick;
+      if (lcache.has(key)) return lcache.get(key);
+      const ior = Math.max(1.01, v.ior);
+      const H = t => { const c = Math.sqrt(1 - (1 - t) ** 2); return v.profile === 'convex' ? c : v.profile === 'squircle' ? (1 - (1 - t) ** 4) ** .25 : v.profile === 'concave' ? 1 - c : c * (1 - t) + (1 - c) * t; };
+      const L = [], e = .01; let mx = 1e-6;
+      for (let i = 0; i < 128; i++) {
+        const t = Math.min(.99, Math.max(.01, i / 127)), dh = (H(Math.min(1, t + e)) - H(Math.max(0, t - e))) / (2 * e), s = Math.max(-8, Math.min(8, v.thick * dh)), a1 = Math.atan(s), a2 = Math.asin(Math.sin(a1) / ior), val = Math.tan(a1) - Math.tan(a2);
+        L.push(val); if (t >= .03) mx = Math.max(mx, Math.abs(val));
+      }
+      const out = L.map(x => Math.max(-1, Math.min(1, x / mx)));
+      lcache.set(key, out); if (lcache.size > 16) lcache.delete(lcache.keys().next().value);
+      return out;
+    }
+
+    // p.bevel/p.scale are already px here. R = [tl, tr, br, bl] corner radii
+    function buildMap(p, w, h, R) {
+      let k = clamp(p.mapRes, .1, 1);
+      if (p.maxMapPx > 0) k = Math.min(k, Math.sqrt(p.maxMapPx / (w * h)));
+      const mw = Math.max(2, Math.ceil(w * k)), mh = Math.max(2, Math.ceil(h * k));
+      const key = [w, h, R.join(','), p.profile, p.ior, p.thick, p.bevel.toFixed(2), p.edgePow, p.invert ? 1 : 0, mw, mh].join('|');
+      let m = mcache.get(key);
+      if (m) { mcache.delete(key); mcache.set(key, m); return m; }
+      const t0 = performance.now();
+      const cv = document.createElement('canvas'); cv.width = mw; cv.height = mh;
+      const cx = cv.getContext('2d'), im = cx.createImageData(mw, mh), D = im.data;
+      const hw = w / 2, hh = h / 2, bw = Math.max(1e-3, p.bevel), L = lut(p), inv = p.invert ? -1 : 1, ep = p.edgePow || 1;
+      for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) {
+        const px = (x + .5) / mw * w - hw, py = (y + .5) / mh * h - hh;
+        const r = px < 0 ? (py < 0 ? R[0] : R[3]) : (py < 0 ? R[1] : R[2]);
+        const qx = Math.abs(px) - (hw - r), qy = Math.abs(py) - (hh - r), sx = px < 0 ? -1 : 1, sy = py < 0 ? -1 : 1;
+        const dist = -(Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r);
+        let nx, ny;
+        if (qx > 0 && qy > 0) { const l = Math.hypot(qx, qy) || 1; nx = sx * qx / l; ny = sy * qy / l; }
+        else if (qx > qy) { nx = sx; ny = 0; } else { nx = 0; ny = sy; }
+        let t = Math.min(1, Math.max(0, dist / bw)); if (ep !== 1) t = t ** ep;
+        const mg = L[Math.min(127, t * 127 | 0)], dx = clamp(-nx * mg * inv, -1, 1), dy = clamp(-ny * mg * inv, -1, 1), i = (y * mw + x) * 4;
+        D[i] = 127.5 + 127.5 * dx; D[i + 1] = 127.5 + 127.5 * dy; D[i + 2] = 128; D[i + 3] = 255;
+      }
+      cx.putImageData(im, 0, 0);
+      m = { url: cv.toDataURL(), mw, mh, key };
+      S.lastMs = performance.now() - t0;
+      mcache.set(key, m); if (mcache.size > 24) mcache.delete(mcache.keys().next().value);
+      return m;
+    }
+
+    // fast (q<0) <-> pretty (q>0). q=0 leaves everything exactly as picked. values inside their comfort band barely move,
+    // radical values move the most. fast also skips huge panels (gpu cost grows with area), pretty pulls odd values to sane ones
+    function tune(p, q, w, h) {
+      if (!q) return p;
+      const o = { ...p }, a = Math.abs(q), mh = Math.min(w, h) / 2 || 1;
+      const pull = (v, lo, hi, tg, mn, mx, base) => {
+        const r = v < lo ? (lo - v) / Math.max(1e-6, lo - mn) : v > hi ? (v - hi) / Math.max(1e-6, mx - hi) : 0;
+        return v + (tg - v) * clamp(a * (base + (1 - base) * clamp(r, 0, 1)), 0, 1);
+      };
+      if (q < 0) {
+        o.mapRes = pull(p.mapRes, .5, 1, .3, .2, 1, .85);
+        o.maxMapPx = p.maxMapPx * (1 - .6 * a);
+        const cap = 120000 + 900000 * (1 + q) ** 2;
+        o.maxArea = p.maxArea > 0 ? Math.min(p.maxArea, cap) : cap;
+      } else {
+        o.mapRes = p.mapRes + (1 - p.mapRes) * a;
+        o.maxMapPx = p.maxMapPx * (1 + a);
+        o.scale = pull(p.scale, .05 * mh, mh, .6 * mh, 0, 1.5 * mh, 0);
+        o.bevel = pull(p.bevel, .3 * mh, mh, .8 * mh, 0, 1.5 * mh, 0);
+        o.thick = pull(p.thick, .8, 2.5, 1.5, .2, 4, 0);
+        o.ior = pull(p.ior, 1.2, 1.9, 1.5, 1.05, 2.5, 0);
+      }
+      return o;
+    }
+
+    function host() {
+      if (!S.host || !S.host.isConnected) {
+        S.host = document.createElementNS(NS, 'svg');
+        S.host.setAttribute('width', '0'); S.host.setAttribute('height', '0');
+        S.host.style.cssText = 'position:absolute;pointer-events:none';
+        (document.body || document.documentElement).appendChild(S.host);
+      }
+      return S.host;
+    }
+    function radii(el, w, h) {
+      const cs = getComputedStyle(el), m = Math.min(w, h) / 2;
+      return ['TopLeft', 'TopRight', 'BottomRight', 'BottomLeft'].map(c => {
+        const s = cs['border' + c + 'Radius'] || ''; let r = parseFloat(s) || 0;
+        if (s.includes('%')) r = r / 100 * Math.min(w, h);
+        return Math.min(r, m);
+      });
+    }
+    function resolve(it, w, h) {
+      const p = { ...DEF, ...S.params, ...(it.own || {}) }, mh = Math.min(w, h) / 2;
+      if (p.relBevel) p.bevel = Math.min(p.bevel / 100 * mh, p.maxBevel);
+      if (p.relScale) p.scale = Math.min(p.scale / 100 * mh, p.maxScale);
+      return tune(p, S.q, w, h);
+    }
+    function clear(it) {
+      it.el.style.removeProperty('backdrop-filter'); it.el.style.removeProperty('-webkit-backdrop-filter');
+      if (it.f) { it.f.remove(); it.f = null; it.fk = null; }
+    }
+    function drop(it) { clear(it); it.ro.disconnect(); clearTimeout(it.t); S.items.delete(it); byEl.delete(it.el); }
+
+    function apply(it) {
+      const el = it.el;
+      if (!el.isConnected) { drop(it); return; }
+      const w = Math.round(el.offsetWidth), h = Math.round(el.offsetHeight);
+      if (!w || !h) { clear(it); return; }
+      const p = resolve(it, w, h);
+      if (p.maxArea > 0 && w * h > p.maxArea) { clear(it); return; }
+      const m = buildMap(p, w, h, radii(el, w, h)), fk = m.key + '|' + p.scale.toFixed(2);
+      // read what the stylesheet wants first (blur/saturate/brightness...), then put url() behind it. important so it also survives mu-noblur
+      el.style.removeProperty('backdrop-filter'); el.style.removeProperty('-webkit-backdrop-filter');
+      let base = getComputedStyle(el).backdropFilter; if (!base || base === 'none') base = '';
+      if (it.fk !== fk) {
+        const id = 'mulg' + (++S.uid), f = document.createElementNS(NS, 'filter');
+        f.id = id; f.setAttribute('filterUnits', 'userSpaceOnUse');
+        f.setAttribute('x', 0); f.setAttribute('y', 0); f.setAttribute('width', w); f.setAttribute('height', h);
+        f.setAttribute('color-interpolation-filters', 'sRGB');
+        f.innerHTML = `<feImage href="${m.url}" x="0" y="0" width="${w}" height="${h}" preserveAspectRatio="none" result="map"/><feDisplacementMap in="SourceGraphic" in2="map" scale="${(p.scale * 2).toFixed(2)}" xChannelSelector="R" yChannelSelector="G"/>`;
+        host().appendChild(f); if (it.f) it.f.remove(); it.f = f; it.fk = fk;
+      }
+      const v = (base ? base + ' ' : '') + 'url(#' + it.f.id + ')';
+      el.style.setProperty('backdrop-filter', v, 'important'); el.style.setProperty('-webkit-backdrop-filter', v, 'important');
+    }
+
+    function track(el, o = {}) {
+      let it = byEl.get(el);
+      if (it) { if (o.own !== undefined) { it.own = o.own; refreshPreviews(); } return it; }
+      it = { el, group: o.group || null, own: o.own || null, f: null, fk: null, t: 0 };
+      it.ro = new ResizeObserver(() => { clearTimeout(it.t); it.t = setTimeout(() => apply(it), it.fk ? 90 : 0); });
+      it.ro.observe(el); S.items.add(it); byEl.set(el, it);
+      return it;
+    }
+    // light refresh: re-reads css and rewrites inline filters, maps come from cache unless the params changed
+    function refresh() { if (S.raf) return; S.raf = requestAnimationFrame(() => { S.raf = 0; for (const it of [...S.items]) apply(it); }); }
+    function refreshPreviews() { if (S.rp) return; S.rp = requestAnimationFrame(() => { S.rp = 0; for (const it of [...S.items]) if (!it.group) apply(it); }); }
+
+    function watch(on) {
+      if (!on) { if (S.mo) { S.mo.disconnect(); S.mo = null; } return; }
+      if (S.mo) return;
+      S.mo = new MutationObserver(recs => {
+        const gs = [...S.groups.values()].filter(g => g.enabled && g.selector);
+        for (const r of recs) for (const n of r.addedNodes) {
+          if (n.nodeType !== 1) continue;
+          for (const g of gs) {
+            if (n.matches(g.selector)) track(n, { group: g.key });
+            if (n.firstElementChild) n.querySelectorAll(g.selector).forEach(el => track(el, { group: g.key }));
+          }
+        }
+        for (const it of [...S.items]) if (!it.el.isConnected) drop(it);
+      });
+      S.mo.observe(document.body, { childList: true, subtree: true });
+    }
+    function doSync() {
+      const active = S.on && supported;
+      for (const it of [...S.items]) if (it.group && (!active || !(S.groups.get(it.group) || {}).enabled)) drop(it);
+      if (active) for (const g of S.groups.values()) if (g.enabled && g.selector) document.querySelectorAll(g.selector).forEach(el => track(el, { group: g.key }));
+      watch(active && [...S.groups.values()].some(g => g.enabled && g.selector));
+    }
+    function sync() { if (S.sq) return; S.sq = requestAnimationFrame(() => { S.sq = 0; doSync(); }); }
+
+    if (supported) document.addEventListener('mu:designchange', () => setTimeout(refresh, 60));
+
+    return {
+      supported, defaults: { ...DEF }, looks: LOOKS,
+      get enabled() { return S.on; },
+      get params() { return { ...DEF, ...S.params }; },
+      get quality() { return S.q; },
+      enable(on = true) { S.on = !!on; sync(); },
+      configure({ params, quality } = {}) {
+        let ch = false;
+        if (params && !same(params, S.params)) { S.params = { ...params }; ch = true; }
+        if (quality != null && +quality !== S.q) { S.q = clamp(+quality || 0, -1, 1); ch = true; }
+        if (ch) { refreshPreviews(); clearTimeout(S.gt); S.gt = setTimeout(refresh, 160); }
+      },
+      group(key, o = {}) {
+        const g = S.groups.get(key) || { key, selector: '', enabled: true }, prev = g.selector + '|' + g.enabled;
+        Object.assign(g, o); g.key = key; S.groups.set(key, g);
+        if (prev !== g.selector + '|' + g.enabled) sync();
+        return g;
+      },
+      removeGroup(key) { S.groups.delete(key); sync(); },
+      attach(el, o = {}) {
+        if (!supported) return { update() {}, detach() {} };
+        const it = track(el, { own: o.params || null });
+        return { update(np) { it.own = np || null; refreshPreviews(); }, detach() { drop(it); } };
+      },
+      mountPreviews(root = document) {
+        for (const it of [...S.items]) if (!it.el.isConnected) drop(it);
+        if (supported) root.querySelectorAll('[data-lg-preview]').forEach(el => track(el));
+      },
+      refresh,
+      stats() { return { supported, enabled: S.on, items: S.items.size, maps: mcache.size, lastMapMs: +S.lastMs.toFixed(1) }; },
+    };
+  })();
+
   window.MU = {
     _initialized: false,
     init(opts = {}) {
@@ -3346,8 +3574,16 @@ void main() {
     setBri(bri) { Palette.setBri(bri); },
     setPalette(opts) { Palette.setPalette(opts); },
     setBlur,
-    setGlass({ alpha, blur } = {}) {
+    setGlass({ alpha, blur, sat, bright, contrast } = {}) {
       const r = document.documentElement;
+      if (sat != null) r.style.setProperty('--glass-sat', sat);
+      if (bright != null) GlassFx.b = bright;
+      if (contrast != null) GlassFx.c = contrast;
+      if (bright != null || contrast != null) {
+        const fx = [GlassFx.b !== 1 ? `brightness(${GlassFx.b})` : '', GlassFx.c !== 1 ? `contrast(${GlassFx.c})` : ''].filter(Boolean).join(' ');
+        if (fx) r.style.setProperty('--glass-fx', fx); else r.style.removeProperty('--glass-fx');
+      }
+      LiquidGlass.refresh();
       if (alpha != null) {
         r.style.setProperty('--glass-a', Math.min(1, alpha));
         r.style.setProperty('--glass-s', Math.max(0, Math.min(1, alpha - 1)));
@@ -3373,6 +3609,7 @@ void main() {
     stampGearIcons,
     animateSpikyCircle,
     palette: Palette,
+    liquidGlass: LiquidGlass,
     get currentHue() { return Palette.currentHue; },
     get currentSat() { return Palette.currentSat; },
     get currentBri() { return Palette.currentBri; },
