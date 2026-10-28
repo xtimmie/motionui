@@ -3458,10 +3458,10 @@ void main() {
       return R;
     }
     function resolve(it, w, h) {
-      const p = { ...DEF, ...S.params, ...(it.own || {}) }, mh = Math.min(w, h) / 2;
+      const vh = h - (it.pb || 0), p = { ...DEF, ...S.params, ...(it.own || {}) }, mh = Math.min(w, vh) / 2;
       if (p.relBevel) p.bevel = Math.min(p.bevel / 100 * mh, p.maxBevel);
       if (p.relScale) p.scale = Math.min(p.scale / 100 * mh, p.maxScale);
-      return tune(p, S.q, w, h);
+      return tune(p, S.q, w, vh);
     }
     function clear(it) {
       it.el.style.removeProperty('backdrop-filter'); it.el.style.removeProperty('-webkit-backdrop-filter');
@@ -3474,6 +3474,8 @@ void main() {
       if (!el.isConnected) { drop(it); return; }
       const w = Math.round(el.offsetWidth), h = Math.round(el.offsetHeight);
       if (!w || !h) { clear(it); return; }
+      // --lg-pad = px of the element's height that sit offscreen at the bottom, the glass math only uses the visible part
+      it.pb = Math.max(0, Math.min(h - 2, parseFloat(getComputedStyle(el).getPropertyValue('--lg-pad')) || 0));
       const p = resolve(it, w, h);
       if (p.maxArea > 0 && w * h > p.maxArea) { clear(it); return; }
       const m = buildMap(p, w, h, radii(el, w, h)), fk = m.key + '|' + p.scale.toFixed(2);
