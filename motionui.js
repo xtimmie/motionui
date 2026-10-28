@@ -2991,7 +2991,7 @@ void main() {
         bodySetup()   {},
         teardown()    {},
         // bloom tokens — hue flows through --color-primary/secondary which already track it
-        applyTokens() {
+        applyTokens(hueArg, satArg) {
           const r = document.documentElement;
           r.style.setProperty('--bloom-bg',        'oklch(2% 0 0)');
           r.style.setProperty('--bloom-surface',   'oklch(6% 0 0)');
@@ -3000,7 +3000,7 @@ void main() {
           r.style.setProperty('--bloom-text-dim',  'oklch(52% 0.01 0)');
           r.style.setProperty('--bloom-glow',      'var(--color-primary)');
           r.style.setProperty('--bloom-glow-2',    'var(--color-secondary)');
-          const sat = Palette.currentSat ?? 60;
+          const sat = satArg ?? Palette.currentSat ?? 60;
           // radius scales with sat — more sat = wider bloom
           const glowR = Math.round(20 + (sat / 100) * 28);
           r.style.setProperty('--bloom-radius',    `${glowR}px`);
@@ -3021,11 +3021,11 @@ void main() {
           const l = document.getElementById('mu-terminal-font');
           if (l) l.remove();
         },
-        applyTokens() {
+        applyTokens(hueArg, satArg, briArg) {
           const r   = document.documentElement;
-          const hue = Palette.currentHue;
-          const sat = Palette.currentSat;
-          const bv  = Palette.currentBri;
+          const hue = +(hueArg ?? Palette.currentHue).toFixed(1);
+          const sat = satArg ?? Palette.currentSat;
+          const bv  = briArg ?? Palette.currentBri;
           const cm  = sat / 50;
           const oc  = c => +(c * cm).toFixed(4);
           // phosphor glow color — vivid primary at current hue
@@ -3052,6 +3052,8 @@ void main() {
           r.style.setProperty('--trm-text-dim',    textDim);
           r.style.setProperty('--trm-border',      border);
           r.style.setProperty('--trm-border-hi',   borderHi);
+          r.style.setProperty('--trm-green-ghost', `oklch(${(glowL * 100).toFixed(1)}% ${glowC.toFixed(3)} ${hue} / 0.15)`);
+          r.style.setProperty('--trm-red',         '#ff3333');
         },
       },
     },
