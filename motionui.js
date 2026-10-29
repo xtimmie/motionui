@@ -3378,8 +3378,9 @@ void main() {
       if (p.maxMapPx > 0) k = Math.min(k, Math.sqrt(p.maxMapPx / (w * h)));
       const mw = Math.max(2, Math.ceil(w * k)), mh = Math.max(2, Math.ceil(h * k));
       const K = Math.max(1, R.k || 2);
-      // seam smoothing: blur radius (px) of the edge weights, 0 = hard nearest edge
+      // seam smoothing: the whole distance field gets blurred (radius rad in map px) so creases become soft ridges, 0 = hard
       let tau = Math.max(0, +p.soft || 0) * Math.min(w, h) / 2; if (tau < .5) tau = 0;
+      const rad = tau ? Math.max(1, Math.round(tau * .75 * mw / w)) : 0;
       const key = [w, h, R.join(','), K, p.profile, p.ior, p.thick, p.bevel.toFixed(2), p.edgePow, p.invert ? 1 : 0, tau.toFixed(1), mw, mh].join('|');
       let m = mcache.get(key);
       if (m) { mcache.delete(key); mcache.set(key, m); return m; }
@@ -3387,25 +3388,50 @@ void main() {
       const cv = document.createElement('canvas'); cv.width = mw; cv.height = mh;
       const cx = cv.getContext('2d'), im = cx.createImageData(mw, mh), D = im.data;
       const hw = w / 2, hh = h / 2, bw = Math.max(1e-3, p.bevel), L = lut(p), inv = p.invert ? -1 : 1, ep = p.edgePow || 1;
-      for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) {
-        const px = (x + .5) / mw * w - hw, py = (y + .5) / mh * h - hh;
+      // signed distance (px, positive inside) of the rounded rect with superellipse corners, also leaves the nearest edge normal in _nx/_ny
+      let _nx = 0, _ny = 0;
+      const sdf = (px, py) => {
         const r = px < 0 ? (py < 0 ? R[0] : R[3]) : (py < 0 ? R[1] : R[2]);
         const qx = Math.abs(px) - (hw - r), qy = Math.abs(py) - (hh - r), sx = px < 0 ? -1 : 1, sy = py < 0 ? -1 : 1;
-        let dist, nx, ny;
         if (qx > 0 && qy > 0) {
           // superellipse corner |x|^K + |y|^K = r^K (K=2 round, K=4 squircle), first order distance and gradient normal
           const ex = Math.max(qx, 1e-6) ** (K - 1), ey = Math.max(qy, 1e-6) ** (K - 1), gl = Math.hypot(ex, ey) || 1;
           const nm = (Math.max(qx, 1e-6) * ex + Math.max(qy, 1e-6) * ey) ** (1 / K);
-          dist = (r - nm) / (gl / (nm ** (K - 1) || 1));
-          nx = sx * ex / gl; ny = sy * ey / gl;
+          _nx = sx * ex / gl; _ny = sy * ey / gl;
+          return (r - nm) / (gl / (nm ** (K - 1) || 1));
+        }
+        if (qx > qy) { _nx = sx; _ny = 0; } else { _nx = 0; _ny = sy; }
+        return r - Math.max(qx, qy);
+      };
+      // smoothed field: sample the sdf on a padded grid, blur it (2 box passes), the push direction is then -gradient of the blurred field
+      let G = null, gw = 0, pad = 0;
+      const spx = w / mw, spy = h / mh; // css px per map px
+      if (rad) {
+        pad = rad * 2 + 2; gw = mw + 2 * pad;
+        const gh = mh + 2 * pad;
+        G = new Float32Array(gw * gh);
+        for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) G[y * gw + x] = sdf((x - pad + .5) * spx - hw, (y - pad + .5) * spy - hh);
+        const tmp = new Float32Array(G.length), win = 2 * rad + 1;
+        const box = (src, dst, n, stride, lines, lstride) => {
+          for (let l = 0; l < lines; l++) {
+            const b = l * lstride; let acc = 0;
+            for (let i = -rad; i <= rad; i++) acc += src[b + Math.min(n - 1, Math.max(0, i)) * stride];
+            for (let i = 0; i < n; i++) {
+              dst[b + i * stride] = acc / win;
+              acc += src[b + Math.min(n - 1, i + rad + 1) * stride] - src[b + Math.max(0, i - rad) * stride];
+            }
+          }
+        };
+        for (let pass = 0; pass < 2; pass++) { box(G, tmp, gw, 1, gh, gw); box(tmp, G, gh, gw, gw, 1); }
+      }
+      for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) {
+        let dist, nx, ny;
+        if (G) {
+          const gi = (y + pad) * gw + x + pad;
+          dist = G[gi];
+          nx = -(G[gi + 1] - G[gi - 1]) / (2 * spx); ny = -(G[gi + gw] - G[gi - gw]) / (2 * spy);
         } else {
-          const dL = hw + px, dR = hw - px, dT = hh + py, dB = hh - py, dm = Math.min(dL, dR, dT, dB);
-          dist = dm;
-          if (tau > 0) {
-            // soft nearest edge: weights fall off with how much farther each edge is, opposite normals cancel on the ridge
-            const wL = Math.exp((dm - dL) / tau), wR = Math.exp((dm - dR) / tau), wT = Math.exp((dm - dT) / tau), wB = Math.exp((dm - dB) / tau), ws = wL + wR + wT + wB;
-            nx = (wR - wL) / ws; ny = (wB - wT) / ws;
-          } else if (dm === dL || dm === dR) { nx = sx; ny = 0; } else { nx = 0; ny = sy; }
+          dist = sdf((x + .5) * spx - hw, (y + .5) * spy - hh); nx = _nx; ny = _ny;
         }
         let t = Math.min(1, Math.max(0, dist / bw)); if (ep !== 1) t = t ** ep;
         const mg = L[Math.min(127, t * 127 | 0)], dx = clamp(-nx * mg * inv, -1, 1), dy = clamp(-ny * mg * inv, -1, 1), i = (y * mw + x) * 4;
