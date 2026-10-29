@@ -3378,10 +3378,9 @@ void main() {
       if (p.maxMapPx > 0) k = Math.min(k, Math.sqrt(p.maxMapPx / (w * h)));
       const mw = Math.max(2, Math.ceil(w * k)), mh = Math.max(2, Math.ceil(h * k));
       const K = Math.max(1, R.k || 2);
-      // seam smoothing: the whole distance field gets blurred (radius rad in map px) so creases become soft ridges, 0 = hard
+      // seam smoothing: the unit normal field gets blurred (radius rad in map px) so creases fade out softly, 0 = hard
       let tau = Math.max(0, +p.soft || 0) * Math.min(w, h) / 2; if (tau < .5) tau = 0;
       const rad = tau ? Math.max(1, Math.round(tau * .75 * mw / w)) : 0;
-      const sk = tau ? .4 * Math.min(1, +p.soft || 0) : 0;
       const key = [w, h, R.join(','), K, p.profile, p.ior, p.thick, p.bevel.toFixed(2), p.edgePow, p.invert ? 1 : 0, tau.toFixed(1), mw, mh].join('|');
       let m = mcache.get(key);
       if (m) { mcache.delete(key); mcache.set(key, m); return m; }
@@ -3389,32 +3388,35 @@ void main() {
       const cv = document.createElement('canvas'); cv.width = mw; cv.height = mh;
       const cx = cv.getContext('2d'), im = cx.createImageData(mw, mh), D = im.data;
       const hw = w / 2, hh = h / 2, bw = Math.max(1e-3, p.bevel), L = lut(p), inv = p.invert ? -1 : 1, ep = p.edgePow || 1;
-      // signed distance (px, positive inside) of the rounded rect with superellipse corners, also leaves the nearest edge normal in _nx/_ny
+      // signed distance (px, positive inside) of the rounded rect with superellipse corners, also leaves the outward edge normal in _nx/_ny
       let _nx = 0, _ny = 0;
       const sdf = (px, py) => {
         const r = px < 0 ? (py < 0 ? R[0] : R[3]) : (py < 0 ? R[1] : R[2]);
         const qx = Math.abs(px) - (hw - r), qy = Math.abs(py) - (hh - r), sx = px < 0 ? -1 : 1, sy = py < 0 ? -1 : 1;
         if (qx > 0 && qy > 0) {
-          // superellipse corner |x|^K + |y|^K = r^K (K=2 round, K=4 squircle), first order distance and gradient normal
-          const ex = Math.max(qx, 1e-6) ** (K - 1), ey = Math.max(qy, 1e-6) ** (K - 1), gl = Math.hypot(ex, ey) || 1;
-          const nm = (Math.max(qx, 1e-6) * ex + Math.max(qy, 1e-6) * ey) ** (1 / K);
+          // superellipse corner |x|^K + |y|^K = r^K (K=2 round, K=4 squircle), gradient normal
+          const ax = Math.max(qx, 1e-6), ay = Math.max(qy, 1e-6), ex = ax ** (K - 1), ey = ay ** (K - 1), gl = Math.hypot(ex, ey) || 1;
+          const nm = (ax * ex + ay * ey) ** (1 / K);
           _nx = sx * ex / gl; _ny = sy * ey / gl;
-          return (r - nm) / (gl / (nm ** (K - 1) || 1));
+          // first order distance is only right on the surface, it fades to plain (r - nm) towards the inner corner point so the field has no jump there
+          const g = gl / (nm ** (K - 1) || 1), u = r > 0 ? Math.min(1.5, nm / r) : 1;
+          return (r - nm) / (1 + (g - 1) * u * u);
         }
         if (qx > qy) { _nx = sx; _ny = 0; } else { _nx = 0; _ny = sy; }
         return r - Math.max(qx, qy);
       };
-      // smoothed field: sample the sdf on a padded grid, blur it (2 box passes), the push direction is then -gradient of the blurred field
-      let G = null, gw = 0, pad = 0;
+      // smoothing: the unit normal field gets blurred (not the distance), so where normals disagree (creases, inner corner points)
+      // the push fades to 0 smoothly. straight edges stay at full strength. distance stays sharp and only drives the strength lut
       const spx = w / mw, spy = h / mh; // css px per map px
+      const pad = rad ? 2 * rad + 2 : 0, gw = mw + 2 * pad, gh = mh + 2 * pad;
+      const NX = new Float32Array(gw * gh), NY = new Float32Array(gw * gh), DD = new Float32Array(mw * mh);
+      for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+        const d = sdf((x - pad + .5) * spx - hw, (y - pad + .5) * spy - hh), gi = y * gw + x;
+        NX[gi] = _nx; NY[gi] = _ny;
+        if (x >= pad && y >= pad && x < pad + mw && y < pad + mh) DD[(y - pad) * mw + x - pad] = d;
+      }
       if (rad) {
-        const radii = [rad], maxR = Math.max(rad, sk * Math.min(mw, mh) / 2);
-        while (radii[radii.length - 1] < maxR && radii.length < 6) radii.push(radii[radii.length - 1] * 2);
-        pad = radii[radii.length - 1] * 2 + 2; gw = mw + 2 * pad;
-        const gh = mh + 2 * pad;
-        const raw = new Float32Array(gw * gh);
-        for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) raw[y * gw + x] = sdf((x - pad + .5) * spx - hw, (y - pad + .5) * spy - hh);
-        const tmp = new Float32Array(raw.length);
+        const tmp = new Float32Array(NX.length);
         const box = (src, dst, n, stride, lines, lstride, r) => {
           const win = 2 * r + 1;
           for (let l = 0; l < lines; l++) {
@@ -3426,30 +3428,10 @@ void main() {
             }
           }
         };
-        const lv = radii.map(r => {
-          const g = raw.slice();
-          for (let pass = 0; pass < 2; pass++) { box(g, tmp, gw, 1, gh, gw, r); box(tmp, g, gh, gw, gw, 1, r); }
-          return g;
-        });
-        if (lv.length === 1) G = lv[0];
-        else {
-          G = new Float32Array(raw.length);
-          for (let y = pad - 1; y <= pad + mh; y++) for (let x = pad - 1; x <= pad + mw; x++) {
-            const gi = y * gw + x, d = Math.max(0, lv[0][gi]);
-            const f = Math.min(lv.length - 1, Math.max(0, Math.log2(Math.max(rad, sk * d) / rad))), i0 = Math.min(lv.length - 2, f | 0), u = f - i0;
-            G[gi] = lv[i0][gi] * (1 - u) + lv[i0 + 1][gi] * u;
-          }
-        }
+        for (const g of [NX, NY]) for (let pass = 0; pass < 2; pass++) { box(g, tmp, gw, 1, gh, gw, rad); box(tmp, g, gh, gw, gw, 1, rad); }
       }
       for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) {
-        let dist, nx, ny;
-        if (G) {
-          const gi = (y + pad) * gw + x + pad;
-          dist = G[gi];
-          nx = -(G[gi + 1] - G[gi - 1]) / (2 * spx); ny = -(G[gi + gw] - G[gi - gw]) / (2 * spy);
-        } else {
-          dist = sdf((x + .5) * spx - hw, (y + .5) * spy - hh); nx = _nx; ny = _ny;
-        }
+        const gi = (y + pad) * gw + x + pad, dist = DD[y * mw + x], nx = NX[gi], ny = NY[gi];
         let t = Math.min(1, Math.max(0, dist / bw)); if (ep !== 1) t = t ** ep;
         const mg = L[Math.min(127, t * 127 | 0)], dx = clamp(-nx * mg * inv, -1, 1), dy = clamp(-ny * mg * inv, -1, 1), i = (y * mw + x) * 4;
         D[i] = 127.5 + 127.5 * dx; D[i + 1] = 127.5 + 127.5 * dy; D[i + 2] = 128; D[i + 3] = 255;
