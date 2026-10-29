@@ -3518,7 +3518,7 @@ void main() {
     }
     function doSync() {
       const active = S.on && supported;
-      for (const it of [...S.items]) if (it.group && (!active || !(S.groups.get(it.group) || {}).enabled)) drop(it);
+      for (const it of [...S.items]) if (it.group) { const g = S.groups.get(it.group); if (!active || !g || !g.enabled || (g.selector && !it.el.matches(g.selector))) drop(it); }
       if (active) for (const g of S.groups.values()) if (g.enabled && g.selector) document.querySelectorAll(g.selector).forEach(el => track(el, { group: g.key }));
       watch(active && [...S.groups.values()].some(g => g.enabled && g.selector));
     }
