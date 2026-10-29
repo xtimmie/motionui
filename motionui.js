@@ -3381,6 +3381,7 @@ void main() {
       // seam smoothing: the whole distance field gets blurred (radius rad in map px) so creases become soft ridges, 0 = hard
       let tau = Math.max(0, +p.soft || 0) * Math.min(w, h) / 2; if (tau < .5) tau = 0;
       const rad = tau ? Math.max(1, Math.round(tau * .75 * mw / w)) : 0;
+      const sk = tau ? .4 * Math.min(1, +p.soft || 0) : 0;
       const key = [w, h, R.join(','), K, p.profile, p.ior, p.thick, p.bevel.toFixed(2), p.edgePow, p.invert ? 1 : 0, tau.toFixed(1), mw, mh].join('|');
       let m = mcache.get(key);
       if (m) { mcache.delete(key); mcache.set(key, m); return m; }
@@ -3407,22 +3408,38 @@ void main() {
       let G = null, gw = 0, pad = 0;
       const spx = w / mw, spy = h / mh; // css px per map px
       if (rad) {
-        pad = rad * 2 + 2; gw = mw + 2 * pad;
+        const radii = [rad], maxR = Math.max(rad, sk * Math.min(mw, mh) / 2);
+        while (radii[radii.length - 1] < maxR && radii.length < 6) radii.push(radii[radii.length - 1] * 2);
+        pad = radii[radii.length - 1] * 2 + 2; gw = mw + 2 * pad;
         const gh = mh + 2 * pad;
-        G = new Float32Array(gw * gh);
-        for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) G[y * gw + x] = sdf((x - pad + .5) * spx - hw, (y - pad + .5) * spy - hh);
-        const tmp = new Float32Array(G.length), win = 2 * rad + 1;
-        const box = (src, dst, n, stride, lines, lstride) => {
+        const raw = new Float32Array(gw * gh);
+        for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) raw[y * gw + x] = sdf((x - pad + .5) * spx - hw, (y - pad + .5) * spy - hh);
+        const tmp = new Float32Array(raw.length);
+        const box = (src, dst, n, stride, lines, lstride, r) => {
+          const win = 2 * r + 1;
           for (let l = 0; l < lines; l++) {
             const b = l * lstride; let acc = 0;
-            for (let i = -rad; i <= rad; i++) acc += src[b + Math.min(n - 1, Math.max(0, i)) * stride];
+            for (let i = -r; i <= r; i++) acc += src[b + Math.min(n - 1, Math.max(0, i)) * stride];
             for (let i = 0; i < n; i++) {
               dst[b + i * stride] = acc / win;
-              acc += src[b + Math.min(n - 1, i + rad + 1) * stride] - src[b + Math.max(0, i - rad) * stride];
+              acc += src[b + Math.min(n - 1, i + r + 1) * stride] - src[b + Math.max(0, i - r) * stride];
             }
           }
         };
-        for (let pass = 0; pass < 2; pass++) { box(G, tmp, gw, 1, gh, gw); box(tmp, G, gh, gw, gw, 1); }
+        const lv = radii.map(r => {
+          const g = raw.slice();
+          for (let pass = 0; pass < 2; pass++) { box(g, tmp, gw, 1, gh, gw, r); box(tmp, g, gh, gw, gw, 1, r); }
+          return g;
+        });
+        if (lv.length === 1) G = lv[0];
+        else {
+          G = new Float32Array(raw.length);
+          for (let y = pad - 1; y <= pad + mh; y++) for (let x = pad - 1; x <= pad + mw; x++) {
+            const gi = y * gw + x, d = Math.max(0, lv[0][gi]);
+            const f = Math.min(lv.length - 1, Math.max(0, Math.log2(Math.max(rad, sk * d) / rad))), i0 = Math.min(lv.length - 2, f | 0), u = f - i0;
+            G[gi] = lv[i0][gi] * (1 - u) + lv[i0 + 1][gi] * u;
+          }
+        }
       }
       for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) {
         let dist, nx, ny;
