@@ -3344,7 +3344,7 @@ void main() {
       profile: 'squircle', ior: 1.5, thick: 1.5, edgePow: 1, invert: false,
       bevel: 92, relBevel: true, maxBevel: 100,
       scale: 89, relScale: true, maxScale: 80,
-      mapRes: 1, maxMapPx: 160000, maxArea: 0,
+      mapRes: 1, maxMapPx: 160000, maxArea: 0, soft: .25,
     };
     const LOOKS = {
       panel:     {},
@@ -3378,7 +3378,9 @@ void main() {
       if (p.maxMapPx > 0) k = Math.min(k, Math.sqrt(p.maxMapPx / (w * h)));
       const mw = Math.max(2, Math.ceil(w * k)), mh = Math.max(2, Math.ceil(h * k));
       const K = Math.max(1, R.k || 2);
-      const key = [w, h, R.join(','), K, p.profile, p.ior, p.thick, p.bevel.toFixed(2), p.edgePow, p.invert ? 1 : 0, mw, mh].join('|');
+      // seam smoothing: blur radius (px) of the edge weights, 0 = hard nearest edge
+      let tau = Math.max(0, +p.soft || 0) * Math.min(w, h) / 2; if (tau < .5) tau = 0;
+      const key = [w, h, R.join(','), K, p.profile, p.ior, p.thick, p.bevel.toFixed(2), p.edgePow, p.invert ? 1 : 0, tau.toFixed(1), mw, mh].join('|');
       let m = mcache.get(key);
       if (m) { mcache.delete(key); mcache.set(key, m); return m; }
       const t0 = performance.now();
@@ -3397,8 +3399,13 @@ void main() {
           dist = (r - nm) / (gl / (nm ** (K - 1) || 1));
           nx = sx * ex / gl; ny = sy * ey / gl;
         } else {
-          dist = r - Math.max(qx, qy);
-          if (qx > qy) { nx = sx; ny = 0; } else { nx = 0; ny = sy; }
+          const dL = hw + px, dR = hw - px, dT = hh + py, dB = hh - py, dm = Math.min(dL, dR, dT, dB);
+          dist = dm;
+          if (tau > 0) {
+            // soft nearest edge: weights fall off with how much farther each edge is, opposite normals cancel on the ridge
+            const wL = Math.exp((dm - dL) / tau), wR = Math.exp((dm - dR) / tau), wT = Math.exp((dm - dT) / tau), wB = Math.exp((dm - dB) / tau), ws = wL + wR + wT + wB;
+            nx = (wR - wL) / ws; ny = (wB - wT) / ws;
+          } else if (dm === dL || dm === dR) { nx = sx; ny = 0; } else { nx = 0; ny = sy; }
         }
         let t = Math.min(1, Math.max(0, dist / bw)); if (ep !== 1) t = t ** ep;
         const mg = L[Math.min(127, t * 127 | 0)], dx = clamp(-nx * mg * inv, -1, 1), dy = clamp(-ny * mg * inv, -1, 1), i = (y * mw + x) * 4;
