@@ -102,6 +102,13 @@
     animateTo(toHue, dur = 700, toSat) {
       const satTo = (toSat === undefined || toSat === null) ? this.currentSat : toSat;
       if (prefersReduced()) { this.currentHue = ((toHue % 360) + 360) % 360; this.currentSat = satTo; this.applyTokens(this.currentHue); return; }
+      // hidden/minimized: rAF is paused so the anim would freeze half way and the next one would start from a stale _shownHue. just snap
+      if (document.hidden) {
+        if (this._animRaf) { cancelAnimationFrame(this._animRaf); this._animRaf = null; }
+        this.currentHue = ((toHue % 360) + 360) % 360; this.currentSat = satTo;
+        this.applyTokens(this.currentHue, this.currentSat, this.currentBri);
+        return;
+      }
       const from  = this._animRaf ? this._shownHue : this.currentHue;
       const fromSat = this._animRaf ? (this._shownSat ?? this.currentSat) : this.currentSat;
       const _ref = hh => {
@@ -127,6 +134,16 @@
       const start = performance.now();
       if (this._animRaf) cancelAnimationFrame(this._animRaf);
       this._lastStep = 0;
+      // seed so an interrupt before the first frame never reads a stale/undefined _shownHue
+      this._shownHue = from; this._shownSat = fromSat;
+      // watchdog: if rAF gets paused without document.hidden (minimized, webview suspended) finish anyway
+      const _tok = this._animTok = (this._animTok || 0) + 1;
+      setTimeout(() => {
+        if (this._animTok !== _tok || !this._animRaf) return;
+        cancelAnimationFrame(this._animRaf); this._animRaf = null;
+        this.currentHue = ((toHue % 360) + 360) % 360; this.currentSat = satTo;
+        this.applyTokens(this.currentHue, this.currentSat, this.currentBri);
+      }, dur + 150);
       const step = now => {
         const t    = Math.min((now - start) / dur, 1);
         if (t < 1 && now - this._lastStep < 33) { this._animRaf = requestAnimationFrame(step); return; }
