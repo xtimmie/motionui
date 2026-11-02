@@ -3545,16 +3545,23 @@ void main() {
     }
     // signed distance field (css px, positive inside) of the union of mem = [{x,y,w,h,R}] after a morphological closing of radius r:
     // dilate by r, erode by r, so concave joints turn into fillets of radius r and gaps under 2r get bridged. returns a sampler (px,py) -> [dist, outwardNx, outwardNy]
-    function unionField(mem, W, H, r, cap, raster) {
+    function unionField(mem, W, H, r, cap, raster, extra) {
       const ku = Math.min(1, Math.sqrt(cap / (W * H))), rp = r * ku, pd = Math.ceil(rp) + 3;
       const gw = Math.ceil(W * ku) + 2 * pd, gh = Math.ceil(H * ku) + 2 * pd, N = gw * gh, M = new Uint8Array(N);
       if (raster) raster(M, gw, gh, ku, pd);
       else {
         const cv = document.createElement('canvas'); cv.width = gw; cv.height = gh;
         const cx = cv.getContext('2d', { willReadFrequently: true });
-        cx.beginPath();
-        for (const m of mem) { const a = pd + m.x * ku, b = pd + m.y * ku, c = m.w * ku, d = m.h * ku; if (cx.roundRect) cx.roundRect(a, b, c, d, m.R.map(q => q * ku)); else cx.rect(a, b, c, d); }
-        cx.fill();
+        const E = (pd + 3) / ku;
+        for (const m of mem) {
+          let x = m.x, y = m.y, w = m.w, h = m.h; const q = [m.R[0], m.R[1], m.R[2], m.R[3]], e = m.ex || [0, 0, 0, 0];
+          if (e[0]) { x -= E; w += E; q[0] = q[3] = 0; }
+          if (e[1]) { y -= E; h += E; q[0] = q[1] = 0; }
+          if (e[2]) { w += E; q[1] = q[2] = 0; }
+          if (e[3]) { h += E; q[2] = q[3] = 0; }
+          cx.beginPath(); sePath(cx, pd + x * ku, pd + y * ku, w * ku, h * ku, q.map(v => v * ku), m.R.k); cx.fill();
+        }
+        if (extra) extra(cx, ku, pd, sePath);
         const px = cx.getImageData(0, 0, gw, gh).data;
         for (let i = 0; i < N; i++) M[i] = px[i * 4 + 3] > 127 ? 1 : 0;
       }
@@ -3594,6 +3601,19 @@ void main() {
       if (mg.built && gap < 120 && now - mg.draftAt > 90) { mg.draftAt = now; applyMerge(mg, true); }
       mg.t = setTimeout(() => applyMerge(mg), mg.built ? (gap < 120 ? 140 : 40) : 0);
     }
+    // subpath of a rect with superellipse corners (k=2 round, 4 squircle, same shape css corner-shape draws), R = [tl, tr, br, bl]
+    function sePath(cx, x, y, w, h, R, k) {
+      const ex = 2 / Math.max(.5, k || 2), n = 20, P = Math.PI / 2;
+      const cs = [[x + R[0], y + R[0], -1, -1, 1], [x + w - R[1], y + R[1], 1, -1, 0], [x + w - R[2], y + h - R[2], 1, 1, 1], [x + R[3], y + h - R[3], -1, 1, 0]];
+      cs.forEach(([ccx, ccy, sx, sy, cosx], i) => {
+        const r = R[i];
+        for (let j = 0; j <= n; j++) {
+          const a = j / n * P, c = Math.cos(a) ** ex, s = Math.sin(a) ** ex, ox = r * (cosx ? c : s), oy = r * (cosx ? s : c);
+          if (i === 0 && j === 0) cx.moveTo(ccx + sx * ox, ccy + sy * oy); else cx.lineTo(ccx + sx * ox, ccy + sy * oy);
+        }
+      });
+      cx.closePath();
+    }
     function applyMerge(mg, draft) {
       const items = [...S.items].filter(i => i.group && mg.groups.includes(i.group) && i.el.isConnected), vis = [], rect = new Map();
       for (const i of items) if (i.el.offsetWidth && i.el.offsetHeight) { vis.push(i); rect.set(i, i.el.getBoundingClientRect()); }
@@ -3618,9 +3638,36 @@ void main() {
       const mem = c.map(it => {
         const el = it.el, r = rect.get(it), w = Math.round(el.offsetWidth), h = Math.round(el.offsetHeight);
         it.pb = Math.max(0, Math.min(h - 2, parseFloat(getComputedStyle(el).getPropertyValue('--lg-pad')) || 0));
-        return { it, w: f1(r.width / z), h: f1(r.height / z), x: f1((r.left - ox) / z), y: f1((r.top - oy) / z), ow: w, oh: h, R: radii(el, w, h) };
+        const L0 = f1((r.left - ox) / z), T0 = f1((r.top - oy) / z), W0 = f1(r.width / z), H0 = f1(r.height / z), tl = 2 / z;
+        // sides that sit on the window edge: the map treats them as open so no rim is drawn there
+        return { it, w: W0, h: H0, x: L0, y: T0, ow: w, oh: h, R: radii(el, w, h), ex: [L0 <= -ox / z + tl ? 1 : 0, T0 <= -oy / z + tl ? 1 : 0, L0 + W0 >= (innerWidth - ox) / z - tl ? 1 : 0, T0 + H0 >= (innerHeight - oy) / z - tl ? 1 : 0] };
       });
       const W = Math.max(...mem.map(m => m.x + m.w)), H = Math.max(...mem.map(m => m.y + m.h));
+      // the real cutout (content area): its rounded corners are what the joints hug, so the gap at each concave corner is filled with exactly that corner
+      let cut = null, extra = null, cuk = '';
+      if (mg.cut) {
+        const ce = document.querySelector(mg.cut);
+        if (ce && ce.offsetWidth && ce.offsetHeight) {
+          const cr = ce.getBoundingClientRect(), cR = radii(ce, Math.round(ce.offsetWidth), Math.round(ce.offsetHeight));
+          cut = { x: f1((cr.left - ox) / z), y: f1((cr.top - oy) / z), w: f1(cr.width / z), h: f1(cr.height / z), R: cR, k: cR.k };
+        }
+      }
+      if (cut) {
+        const inM = (x, y) => mem.some(m => x >= m.x - 1 && x <= m.x + m.w + 1 && y >= m.y - 1 && y <= m.y + m.h + 1);
+        const cs = [[cut.x, cut.y, -1, -1], [cut.x + cut.w, cut.y, 1, -1], [cut.x + cut.w, cut.y + cut.h, 1, 1], [cut.x, cut.y + cut.h, -1, 1]];
+        const on = cs.map(([px, py, sx, sy], i) => cut.R[i] > .5 && inM(px + sx * 3, py - sy * 3) && inM(px - sx * 3, py + sy * 3));
+        cuk = [cut.x, cut.y, cut.w, cut.h, ...cut.R, cut.k, ...on.map(Number)].join(',');
+        extra = (cx, ku, pd, path) => {
+          cs.forEach(([px, py, sx, sy], i) => {
+            if (!on[i]) return;
+            const rr = cut.R[i], bx = pd + (sx < 0 ? px : px - rr) * ku, by = pd + (sy < 0 ? py : py - rr) * ku;
+            cx.save(); cx.beginPath(); cx.rect(bx - 1, by - 1, rr * ku + 2, rr * ku + 2); cx.clip();
+            cx.beginPath(); cx.rect(pd + cut.x * ku, pd + cut.y * ku, cut.w * ku, cut.h * ku);
+            path(cx, pd + cut.x * ku, pd + cut.y * ku, cut.w * ku, cut.h * ku, cut.R.map(v => v * ku), cut.k);
+            cx.fill('evenodd'); cx.restore();
+          });
+        };
+      }
       const rv = typeof mg.radius === 'function' ? mg.radius(c[0].el) : typeof mg.radius === 'string' ? parseFloat(getComputedStyle(c[0].el).getPropertyValue(mg.radius)) : +mg.radius;
       const r = clamp(rv || 0, 0, 300), d = Math.max(2, Math.min(...mem.map(m => Math.min(m.w, m.h - m.it.pb))));
       // one set of params for the whole shape, sized off its thinnest member so the rim has the same width all the way around
@@ -3628,9 +3675,10 @@ void main() {
       if (p.maxArea > 0 && mem.reduce((s, m) => s + m.w * m.h, 0) > p.maxArea) return false;
       p.maxMapPx = draft ? Math.min(p.maxMapPx || 45000, 45000) : (p.maxMapPx || 160000) * 2;
       let field = null;
-      const R = [0, 0, 0, 0]; R.k = 2; R.mh = d / 2;
-      R.uk = 'U' + mem.map(m => [m.x, m.y, m.w, m.h, ...m.R].join(',')).join(';') + '@' + r.toFixed(1);
-      R.u = (px, py) => (field || (field = unionField(mem, W, H, r, p.maxMapPx)))(px, py);
+      const rEff = cut ? Math.min(2, r) : r;
+      const R = [0, 0, 0, 0]; R.k = 2; R.mh = Math.min(d / 2, (r || d) * .8);
+      R.uk = 'U' + mem.map(m => [m.x, m.y, m.w, m.h, ...m.R, m.R.k, ...m.ex].join(',')).join(';') + '@' + rEff.toFixed(1) + '|' + cuk;
+      R.u = (px, py) => (field || (field = unionField(mem, W, H, rEff, p.maxMapPx, null, extra)))(px, py);
       const m = buildMap(p, W, H, R);
       for (const q of mem) place(q.it, m, p, m.key + '|' + p.scale.toFixed(2) + '|' + q.x + ',' + q.y + '|' + q.ow + 'x' + q.oh, q, W, H);
       mg.built = true;
@@ -3717,7 +3765,12 @@ void main() {
     if (supported) {
       document.addEventListener('mu:designchange', () => setTimeout(refresh, 60));
       // a member sliding into place (transform) doesnt resize, so no ResizeObserver tick. rebuild the shape once it lands
-      const landed = e => { const it = S.merges.size && byEl.get(e.target), mg = it && mergeOf(it); if (mg) mergeKick(mg); };
+      const landed = e => {
+        if (!S.merges.size) return;
+        const it = byEl.get(e.target), mg = it && mergeOf(it);
+        if (mg) { mergeKick(mg); return; }
+        for (const g of S.merges.values()) if (g.cut && g.built && e.target.matches && e.target.matches(g.cut)) mergeKick(g);
+      };
       document.addEventListener('transitionend', landed, true); document.addEventListener('animationend', landed, true);
       let ht = 0;
       new MutationObserver(() => { clearTimeout(ht); ht = setTimeout(refresh, 120); }).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-mu-design'] });
@@ -3745,7 +3798,7 @@ void main() {
       merge(key, o = {}) {
         const g = S.merges.get(key) || { key, groups: [], radius: 0, t: 0, lastEv: 0, draftAt: 0, built: false, sig: '' };
         Object.assign(g, o); S.merges.set(key, g);
-        const sig = JSON.stringify([g.groups, typeof g.radius === 'function' ? 'fn' : g.radius, g.enabled !== false]);
+        const sig = JSON.stringify([g.groups, typeof g.radius === 'function' ? 'fn' : g.radius, g.cut || '', g.enabled !== false]);
         if (g.sig !== sig) { g.sig = sig; refresh(); }
         return g;
       },
