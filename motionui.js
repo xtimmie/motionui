@@ -3523,7 +3523,7 @@ void main() {
       return R;
     }
     function resolve(it, w, h) {
-      const vh = h - (it.pb || 0), p = { ...DEF, ...S.params, ...(it.own || {}) }, mh = Math.min(w, vh) / 2;
+      const vh = h - (it.pb || 0), p = { ...DEF, ...S.params, ...((it.group && S.groups.get(it.group) || {}).params || {}), ...(it.own || {}) }, mh = Math.min(w, vh) / 2;
       if (p.relBevel) p.bevel = Math.min(p.bevel / 100 * mh, p.maxBevel);
       if (p.relScale) p.scale = Math.min(p.scale / 100 * mh, p.maxScale);
       return tune(p, S.q, w, vh);
@@ -3599,9 +3599,11 @@ void main() {
     // (concave joints get a fillet of `radius`), every member's filter shows its own slice of that map
     function mergeOf(it) {
       if (!S.merges.size || !it.group) return null;
-      for (const g of S.merges.values()) if (g.enabled !== false && g.groups.includes(it.group) && (!g.when || g.when())) return g;
+      for (const g of S.merges.values()) if (g.enabled !== false && grp(g).includes(it.group) && (!g.when || g.when())) return g;
       return null;
     }
+    // merge.groups can be an array or a function returning one (so a single merge can change its members, e.g. frame with or without the right sidebars)
+    const grp = g => typeof g.groups === 'function' ? g.groups() : g.groups;
     function mergeKick(mg) {
       const now = performance.now(), gap = now - mg.lastEv;
       mg.lastEv = now; clearTimeout(mg.t);
@@ -3752,8 +3754,9 @@ void main() {
       });
     }
     function applyMerge(mg, draft) {
-      for (const g of S.merges.values()) if (g !== mg && (g.pt || (g.ovs && g.ovs.length)) && g.groups.some(x => mg.groups.includes(x))) clearPatches(g);
-      const items = [...S.items].filter(i => i.group && mg.groups.includes(i.group) && i.el.isConnected), vis = [], rect = new Map();
+      const mgs = grp(mg);
+      for (const g of S.merges.values()) if (g !== mg && (g.pt || (g.ovs && g.ovs.length)) && grp(g).some(x => mgs.includes(x))) clearPatches(g);
+      const items = [...S.items].filter(i => i.group && mgs.includes(i.group) && i.el.isConnected), vis = [], rect = new Map();
       for (const i of items) if (i.el.offsetWidth && i.el.offsetHeight) { vis.push(i); rect.set(i, i.el.getBoundingClientRect()); }
       // members that touch (3px slack) form one component, every component of 2+ becomes a merged shape, the rest stays solo
       const par = vis.map((_, n) => n), root = n => par[n] === n ? n : (par[n] = root(par[n])), tol = mg.tol ?? 3;
@@ -3855,7 +3858,7 @@ void main() {
     // merged members go through one pass for the whole shape (refresh() calls this once per member, the microtask collapses them)
     function apply(it) {
       const mg = it.el.isConnected ? mergeOf(it) : null;
-      if (!mg) { for (const g of S.merges.values()) if ((g.pt || (g.ovs && g.ovs.length)) && it.group && g.groups.includes(it.group)) clearPatches(g); applySolo(it); return; }
+      if (!mg) { for (const g of S.merges.values()) if ((g.pt || (g.ovs && g.ovs.length)) && it.group && grp(g).includes(it.group)) clearPatches(g); applySolo(it); return; }
       if (!mg.pend) { mg.pend = true; queueMicrotask(() => { mg.pend = false; applyMerge(mg); }); }
     }
 
@@ -3950,7 +3953,7 @@ void main() {
       merge(key, o = {}) {
         const g = S.merges.get(key) || { key, groups: [], radius: 0, t: 0, lastEv: 0, draftAt: 0, built: false, sig: '' };
         Object.assign(g, o); S.merges.set(key, g);
-        const sig = JSON.stringify([g.groups, typeof g.radius === 'function' ? 'fn' : g.radius, g.cut || '', g.enabled !== false]);
+        const sig = JSON.stringify([grp(g), typeof g.radius === 'function' ? 'fn' : g.radius, g.cut || '', g.enabled !== false]);
         if (g.sig !== sig) { g.sig = sig; refresh(); }
         return g;
       },
@@ -3966,6 +3969,114 @@ void main() {
       },
       refresh,
       stats() { return { supported, enabled: S.on, items: S.items.size, maps: mcache.size, lastMapMs: +S.lastMs.toFixed(1) }; },
+    };
+  })();
+
+  /* ─────────────────────────────────────────────────────────
+     GLASS — one material for every glassy surface
+     a tier is a named set of surfaces: { sel, bg, bgOff, border, spec, hover, blur, refract, fx, important, owns }
+       sel       selector string or array
+       bg/bgOff  background with the backdrop bundle live / without it (bgOff falls back to bg, use it to make panels more solid)
+       border    border-color        spec/hover  box-shadow (always applied, never touched by the slider)
+       blur      backdrop-filter used when live, default var(--glass-blur) (blur + saturate + brightness/contrast)
+       refract   true or a params object for liquidGlass, only runs while the tier is live
+       fx:false  spec only tier, never gets the backdrop bundle (song rows)
+       important add !important to the generated bg/border/spec rules     owns:false  dont write backdrop-filter at all
+     the bundle (blur + sat/bright/contrast + refraction) is all or nothing per tier. configure({level}) decides which tiers have it:
+     order = tiers that keep it longest first, level n = the first n tiers of order, 0 = spec only. edit the order in one place.
+     nothing nested inside an element with a live bundle gets its own (a backdrop filter is a backdrop root, so a child could only
+     see its parents paint). the css and the refraction groups both skip those, that part is free.
+     MU.glass: define(name|map, def) · add(selector, tier) · remove(selector) · configure({on, level, order})
+       active(tier) · tier(name) · level · levels · order · stats() · refresh()
+     ───────────────────────────────────────────────────────── */
+  const Glass = (() => {
+    const L = LiquidGlass, S = { on: true, level: Infinity, order: [], tiers: new Map(), el: null, q: 0, sig: '' };
+    const lst = v => v == null || v === '' ? [] : Array.isArray(v) ? v.filter(Boolean) : [String(v)];
+    const glassy = () => document.documentElement.dataset.muDesign === 'glassy';
+    const lvl = () => Math.max(0, Math.min(S.level, S.order.length));
+    const inLevel = n => { const i = S.order.indexOf(n); return S.on && i > -1 && i < lvl(); };
+    const live = n => { const t = S.tiers.get(n); return !!t && t.sel.length > 0 && t.fx !== false && inLevel(n); };
+    const sl = t => t.sel.join(',');
+
+    function css() {
+      const R = 'html[data-mu-design="glassy"]', tiers = S.order.map(n => S.tiers.get(n)).filter(t => t && t.sel.length), o = [];
+      const all = tiers.map(sl), lv = tiers.filter(t => live(t.name)).map(sl);
+      for (const t of tiers) {
+        const on = live(t.name), s = R + ' :is(' + sl(t) + ')', imp = t.important ? ' !important' : '', d = [];
+        const bg = on ? t.bg : (t.bgOff || t.bg);
+        if (bg) d.push('background:' + bg + imp);
+        if (t.border) d.push('border-color:' + t.border + imp);
+        if (t.spec) d.push('box-shadow:' + t.spec + imp);
+        if (t.owns !== false) {
+          if (on) { const f = t.blur || 'var(--glass-blur)'; d.push('backdrop-filter:' + f + imp, '-webkit-backdrop-filter:' + f + imp); }
+          else d.push('backdrop-filter:none !important', '-webkit-backdrop-filter:none !important');
+        }
+        if (d.length) o.push(s + '{' + d.join(';') + '}');
+        if (t.hover) o.push(s + ':hover{box-shadow:' + t.hover + imp + '}');
+      }
+      if (lv.length) o.push(R + ' :is(' + lv.join(',') + ') :is(' + all.join(',') + '){backdrop-filter:none !important;-webkit-backdrop-filter:none !important}');
+      return o.join('\n');
+    }
+    // refraction groups follow the same rules as the css: only live tiers, never inside another live tier
+    function sync() {
+      const gl = glassy(), lv = S.order.filter(live);
+      const nest = lv.length ? ':not(:is(' + lv.map(n => sl(S.tiers.get(n))).join(',') + ') *)' : '';
+      let sig = '';
+      for (const n of S.order) {
+        const t = S.tiers.get(n), key = 'glass:' + n;
+        if (t && t.refract && gl && lv.includes(n)) {
+          const params = typeof t.refract === 'object' ? t.refract : null;
+          sig += key + JSON.stringify(params);
+          L.group(key, { selector: ':is(' + sl(t) + ')' + nest, enabled: true, params }); t._g = true;
+        } else if (t && t._g) { L.group(key, { enabled: false }); t._g = false; sig += key + 'off'; }
+      }
+      if (sig !== S.sig) { S.sig = sig; L.refresh(); }
+    }
+    function apply() {
+      if (!S.el || !S.el.isConnected) { S.el = document.createElement('style'); S.el.id = 'mu-glass'; (document.head || document.documentElement).appendChild(S.el); }
+      const c = css(); if (S.el.textContent !== c) S.el.textContent = c;
+      sync();
+    }
+    function kick() { if (S.q) return; S.q = 1; queueMicrotask(() => { S.q = 0; apply(); }); }
+    document.addEventListener('mu:designchange', kick);
+
+    return {
+      define(a, b) {
+        const m = typeof a === 'string' ? { [a]: b || {} } : a || {};
+        for (const k of Object.keys(m)) {
+          const d = m[k] || {}, o = S.tiers.get(k) || { sel: [] };
+          S.tiers.set(k, Object.assign(o, d, { name: k, sel: d.sel !== undefined ? lst(d.sel) : o.sel }));
+          if (!S.order.includes(k)) S.order.push(k);
+        }
+        kick(); return this;
+      },
+      add(selector, tier) {
+        const t = S.tiers.get(tier); if (!t) return this;
+        for (const x of lst(selector)) if (!t.sel.includes(x)) t.sel.push(x);
+        kick(); return this;
+      },
+      remove(selector) { const r = lst(selector); for (const t of S.tiers.values()) t.sel = t.sel.filter(x => !r.includes(x)); kick(); return this; },
+      configure({ on, level, order } = {}) {
+        if (on != null) S.on = !!on;
+        if (level != null) S.level = level === Infinity ? Infinity : Math.max(0, Math.round(+level) || 0);
+        if (order) { const od = lst(order).filter(n => S.tiers.has(n)); S.order = od.concat(S.order.filter(n => !od.includes(n))); }
+        kick(); return this;
+      },
+      // true while the tier actually has the backdrop bundle (blur + refraction), meowify uses it to gate its own engine groups
+      active: live,
+      tier(n) { const t = S.tiers.get(n); return t ? { ...t, sel: [...t.sel], active: live(n) } : null; },
+      get enabled() { return S.on; },
+      get level() { return lvl(); },
+      get levels() { return S.order.length; },
+      get order() { return [...S.order]; },
+      refresh: kick,
+      stats() {
+        return {
+          level: lvl(), levels: S.order.length,
+          tiers: S.order.map(n => { const t = S.tiers.get(n); return { tier: n, active: live(n), els: t.sel.length ? document.querySelectorAll(sl(t)).length : 0 }; }),
+          lg: L.stats(),
+        };
+      },
     };
   })();
 
@@ -4025,6 +4136,7 @@ void main() {
     animateSpikyCircle,
     palette: Palette,
     liquidGlass: LiquidGlass,
+    glass: Glass,
     get currentHue() { return Palette.currentHue; },
     get currentSat() { return Palette.currentSat; },
     get currentBri() { return Palette.currentBri; },
