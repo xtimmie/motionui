@@ -4008,7 +4008,7 @@ void main() {
         if (t.border) d.push('border-color:' + t.border + imp);
         if (t.spec) d.push('box-shadow:' + t.spec + imp);
         if (t.owns !== false) {
-          if (on) { const f = t.blur || 'var(--glass-blur)'; d.push('backdrop-filter:' + f + imp, '-webkit-backdrop-filter:' + f + imp); }
+          if (on) { const f = t.blur || 'var(--glass-blur)'; d.push('backdrop-filter:' + f, '-webkit-backdrop-filter:' + f); }
           else d.push('backdrop-filter:none !important', '-webkit-backdrop-filter:none !important');
         }
         if (d.length) o.push(s + '{' + d.join(';') + '}');
