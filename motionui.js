@@ -3458,7 +3458,15 @@ void main() {
       for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) {
         const gi = (y + pad) * gw + x + pad, dist = DD[y * mw + x], nx = NX[gi], ny = NY[gi];
         let t = Math.min(1, Math.max(0, dist / bw)); if (ep !== 1) t = t ** ep;
-        const mg = L[Math.min(127, t * 127 | 0)], dx = clamp(-nx * mg * inv, -1, 1), dy = clamp(-ny * mg * inv, -1, 1), i = (y * mw + x) * 4;
+        const mg = L[Math.min(127, t * 127 | 0)], i = (y * mw + x) * 4;
+        let dx = clamp(-nx * mg * inv, -1, 1), dy = clamp(-ny * mg * inv, -1, 1);
+        if (R.j && R.j.length && p.scale > 0) {
+          const qx = (x + .5) * spx, qy = (y + .5) * spy;
+          for (const j of R.j) {
+            const gx = j.v ? Math.abs(qx - j.pos) : Math.max(0, j.lo - qx, qx - j.hi), gy = j.v ? Math.max(0, j.lo - qy, qy - j.hi) : Math.abs(qy - j.pos), g = Math.hypot(gx, gy) / p.scale;
+            if (j.v) { if (Math.abs(dx) > g) dx = dx < 0 ? -g : g; } else if (Math.abs(dy) > g) dy = dy < 0 ? -g : g;
+          }
+        }
         D[i] = 127.5 + 127.5 * dx; D[i + 1] = 127.5 + 127.5 * dy; D[i + 2] = 128; D[i + 3] = 255;
       }
       cx.putImageData(im, 0, 0);
@@ -3667,9 +3675,9 @@ void main() {
         f.innerHTML = `<feImage href="${m.url}" x="${(-gx * u).toFixed(2)}" y="${(-gy * u).toFixed(2)}" width="${(W * u).toFixed(2)}" height="${(H * u).toFixed(2)}" preserveAspectRatio="none" result="map"/><feDisplacementMap in="SourceGraphic" in2="map" scale="${(p.scale * 2 * u).toFixed(2)}" xChannelSelector="R" yChannelSelector="G"/>`;
         host().appendChild(f);
         const v = (base ? base + ' ' : '') + 'url(#' + id + ')';
-        el.style.cssText = 'position:fixed;pointer-events:none;z-index:2;left:' + ((ox + gx * z) / zp).toFixed(2) + 'px;top:' + ((oy + gy * z) / zp).toFixed(2) + 'px;width:' + gs.toFixed(2) + 'px;height:' + gs.toFixed(2) + 'px;clip-path:' + sliverPoly(i, rr, cut.k, ext, u);
+        el.style.cssText = 'position:fixed;pointer-events:none;z-index:' + (mg.patch && mg.patch.z != null ? mg.patch.z : 2) + ';left:' + ((ox + gx * z) / zp).toFixed(2) + 'px;top:' + ((oy + gy * z) / zp).toFixed(2) + 'px;width:' + gs.toFixed(2) + 'px;height:' + gs.toFixed(2) + 'px;clip-path:' + sliverPoly(i, rr, cut.k, ext, u);
         el.style.setProperty('backdrop-filter', v, 'important'); el.style.setProperty('-webkit-backdrop-filter', v, 'important');
-        document.body.appendChild(el); mg.pt.push({ el, f });
+        const pp = mg.patch && mg.patch.parent; (pp ? (typeof pp === 'string' ? document.querySelector(pp) : pp) : null || document.body).appendChild(el); mg.pt.push({ el, f });
       });
     }
     function applyMerge(mg, draft) {
@@ -3677,7 +3685,7 @@ void main() {
       const items = [...S.items].filter(i => i.group && mg.groups.includes(i.group) && i.el.isConnected), vis = [], rect = new Map();
       for (const i of items) if (i.el.offsetWidth && i.el.offsetHeight) { vis.push(i); rect.set(i, i.el.getBoundingClientRect()); }
       // members that touch (3px slack) form one component, every component of 2+ becomes a merged shape, the rest stays solo
-      const par = vis.map((_, n) => n), root = n => par[n] === n ? n : (par[n] = root(par[n])), tol = 3;
+      const par = vis.map((_, n) => n), root = n => par[n] === n ? n : (par[n] = root(par[n])), tol = mg.tol ?? 3;
       for (let a = 0; a < vis.length; a++) for (let b = a + 1; b < vis.length; b++) {
         const A = rect.get(vis[a]), B = rect.get(vis[b]);
         if (A.left <= B.right + tol && B.left <= A.right + tol && A.top <= B.bottom + tol && B.top <= A.bottom + tol) par[root(a)] = root(b);
@@ -3696,18 +3704,19 @@ void main() {
       z = mg.zoom ? (+mg.zoom() || 1) : Math.round(z * 1000) / 1000;
       if (!(z > .05) || Math.abs(z - 1) < .004) z = 1;
       const ox = Math.min(...c.map(i => rect.get(i).left)), oy = Math.min(...c.map(i => rect.get(i).top)), f1 = v => Math.round(v * 10) / 10;
+      const vb = mg.openEdges === 'none' ? null : typeof mg.openEdges === 'function' ? mg.openEdges() : { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
       const mem = c.map(it => {
         const el = it.el, r = rect.get(it), w = Math.round(el.offsetWidth), h = Math.round(el.offsetHeight);
         it.pb = Math.max(0, Math.min(h - 2, parseFloat(getComputedStyle(el).getPropertyValue('--lg-pad')) || 0));
-        const L0 = f1((r.left - ox) / z), T0 = f1((r.top - oy) / z), W0 = f1(r.width / z), H0 = f1(r.height / z), tl = 2 / z;
-        // sides that sit on the window edge: the map treats them as open so no rim is drawn there
-        return { it, w: W0, h: H0, x: L0, y: T0, ow: w, oh: h, R: radii(el, w, h), ex: [L0 <= -ox / z + tl ? 1 : 0, T0 <= -oy / z + tl ? 1 : 0, L0 + W0 >= (innerWidth - ox) / z - tl ? 1 : 0, T0 + H0 >= (innerHeight - oy) / z - tl ? 1 : 0] };
+        const L0 = f1((r.left - ox) / z), T0 = f1((r.top - oy) / z), W0 = f1(r.width / z), H0 = f1(r.height / z), tl = (mg.edgeTol ?? 2) / z;
+        // sides that sit on the open edge (window by default): the map treats them as open so no rim is drawn there
+        return { it, w: W0, h: H0, x: L0, y: T0, ow: w, oh: h, R: radii(el, w, h), ex: vb ? [L0 <= (vb.left - ox) / z + tl ? 1 : 0, T0 <= (vb.top - oy) / z + tl ? 1 : 0, L0 + W0 >= (vb.right - ox) / z - tl ? 1 : 0, T0 + H0 >= (vb.bottom - oy) / z - tl ? 1 : 0] : [0, 0, 0, 0] };
       });
       const W = Math.max(...mem.map(m => m.x + m.w)), H = Math.max(...mem.map(m => m.y + m.h));
       // the real cutout (content area): its rounded corners are what the joints hug, so the gap at each concave corner is filled with exactly that corner
       let cut = null, extra = null, cuk = '';
       if (mg.cut) {
-        const ce = document.querySelector(mg.cut);
+        const ce = typeof mg.cut === 'function' ? mg.cut() : mg.cut instanceof Element ? mg.cut : document.querySelector(mg.cut);
         if (ce && ce.offsetWidth && ce.offsetHeight) {
           const cr = ce.getBoundingClientRect(), cR = radii(ce, Math.round(ce.offsetWidth), Math.round(ce.offsetHeight));
           cut = { x: f1((cr.left - ox) / z), y: f1((cr.top - oy) / z), w: f1(cr.width / z), h: f1(cr.height / z), R: cR, k: cR.k };
@@ -3737,9 +3746,19 @@ void main() {
       if (p.maxArea > 0 && mem.reduce((s, m) => s + m.w * m.h, 0) > p.maxArea) return false;
       p.maxMapPx = draft ? Math.min(p.maxMapPx || 45000, 45000) : (p.maxMapPx || 160000) * 2;
       let field = null;
-      const rEff = cut ? Math.min(2, r) : r;
+      const rEff = cut ? Math.min(mg.close ?? 2, r) : r;
       const R = [0, 0, 0, 0]; R.k = 2; R.mh = Math.min(d / 2, (r || d) * .8);
-      R.uk = 'U' + mem.map(m => [m.x, m.y, m.w, m.h, ...m.R, m.R.k, ...m.ex].join(',')).join(';') + '@' + rEff.toFixed(1) + '|' + cuk;
+      // joints = places where two members touch. the push is shrunk towards them in buildMap so both sides stay continuous across the joint
+      const joints = [], over = [], jt = mg.tol ?? 3;
+      for (let a = 0; a < mem.length; a++) for (let b = a + 1; b < mem.length; b++) {
+        const A = mem[a], B = mem[b], x0 = Math.max(A.x, B.x), x1 = Math.min(A.x + A.w, B.x + B.w), y0 = Math.max(A.y, B.y), y1 = Math.min(A.y + A.h, B.y + B.h);
+        if (x1 - x0 > 2 && y1 - y0 > 2) over.push([A.it.group, B.it.group]);
+        if (y1 - y0 > 2) for (const [lf, rt] of [[A, B], [B, A]]) if (Math.abs(lf.x + lf.w - rt.x) <= jt) joints.push({ v: 1, pos: (lf.x + lf.w + rt.x) / 2, lo: y0, hi: y1 });
+        if (x1 - x0 > 2) for (const [tp, bt] of [[A, B], [B, A]]) if (Math.abs(tp.y + tp.h - bt.y) <= jt) joints.push({ v: 0, pos: (tp.y + tp.h + bt.y) / 2, lo: x0, hi: x1 });
+      }
+      R.j = joints;
+      if (mg.debug) console.log('[lg merge]', mg.key, { z, scale: p.scale, members: mem.map(m => ({ g: m.it.group, x: m.x, y: m.y, w: m.w, h: m.h, ex: m.ex })), cut: cut && { x: cut.x, y: cut.y, w: cut.w, h: cut.h, on: cut.on }, joints, overlaps: over });
+      R.uk = 'U' + mem.map(m => [m.x, m.y, m.w, m.h, ...m.R, m.R.k, ...m.ex].join(',')).join(';') + '@' + rEff.toFixed(1) + '|' + cuk + '|' + p.scale.toFixed(1) + '|' + joints.length;
       R.u = (px, py) => (field || (field = unionField(mem, W, H, rEff, p.maxMapPx, null, extra)))(px, py);
       const m = buildMap(p, W, H, R);
       for (const q of mem) place(q.it, m, p, m.key + '|' + p.scale.toFixed(2) + '|' + q.x + ',' + q.y + '|' + q.ow + 'x' + q.oh, q, W, H);
@@ -3832,7 +3851,7 @@ void main() {
         if (!S.merges.size) return;
         const it = byEl.get(e.target), mg = it && mergeOf(it);
         if (mg) { mergeKick(mg); return; }
-        for (const g of S.merges.values()) if (g.cut && g.built && e.target.matches && e.target.matches(g.cut)) mergeKick(g);
+        for (const g of S.merges.values()) if (typeof g.cut === 'string' && g.built && e.target.matches && e.target.matches(g.cut)) mergeKick(g);
       };
       document.addEventListener('transitionend', landed, true); document.addEventListener('animationend', landed, true);
       let ht = 0;
