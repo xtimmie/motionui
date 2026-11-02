@@ -3470,7 +3470,7 @@ void main() {
         D[i] = 127.5 + 127.5 * dx; D[i + 1] = 127.5 + 127.5 * dy; D[i + 2] = 128; D[i + 3] = 255;
       }
       cx.putImageData(im, 0, 0);
-      m = { url: cv.toDataURL(), mw, mh, key, px: R.u ? D : null };
+      m = { url: cv.toDataURL(), mw, mh, key };
       S.lastMs = performance.now() - t0;
       mcache.set(key, m); if (mcache.size > 24) mcache.delete(mcache.keys().next().value);
       return m;
@@ -3653,7 +3653,78 @@ void main() {
       for (let j = 0; j <= n; j++) { const a = j / n * P, c = Math.cos(a) ** ex, s = Math.sin(a) ** ex, ox = rr * (C[4] ? c : s), oy = rr * (C[4] ? s : c); pts.push([C[0] + C[2] * ox, C[1] + C[3] * oy]); }
       return 'polygon(' + pts.map(([x, y]) => ((x + ext) * u).toFixed(2) + 'px ' + ((y + ext) * u).toFixed(2) + 'px').join(',') + ')';
     }
-    function clearPatches(mg) { if (mg.pt) { for (const q of mg.pt) { q.el.remove(); q.f.remove(); } mg.pt = null; } }
+    function trimOverlays(mg) { if (!mg.ovs) return; while (mg.ovs.length > (mg.oi || 0)) { const o = mg.ovs.pop(); o.el.remove(); if (o.f) o.f.remove(); if (o.c) o.c.remove(); } }
+    function clearPatches(mg) {
+      if (mg.pt) { for (const q of mg.pt) { q.el.remove(); q.f.remove(); } mg.pt = null; }
+      mg.oi = 0; trimOverlays(mg);
+    }
+    // closed svg subpath of a rect with superellipse corners (k=2 round, 4 squircle), normalized to 0..1 by W,H for a clipPath in objectBoundingBox units
+    function seD(x, y, w, h, R, k, W, H) {
+      const ex = 2 / Math.max(.5, k || 2), n = 20, P = Math.PI / 2, out = [];
+      const cs = [[x + R[0], y + R[0], -1, -1, 1], [x + w - R[1], y + R[1], 1, -1, 0], [x + w - R[2], y + h - R[2], 1, 1, 1], [x + R[3], y + h - R[3], -1, 1, 0]];
+      cs.forEach(([ccx, ccy, sx, sy, cosx], i) => {
+        for (let j = 0; j <= n; j++) {
+          const a = j / n * P, c = Math.cos(a) ** ex, s = Math.sin(a) ** ex, r = R[i];
+          out.push(((ccx + sx * r * (cosx ? c : s)) / W).toFixed(5) + ' ' + ((ccy + sy * r * (cosx ? s : c)) / H).toFixed(5));
+        }
+      });
+      return 'M' + out.join('L') + 'Z';
+    }
+    // the rounded gap of one cutout corner (sharp corner + the arc), grown by e px into its neighbours so no hairline is left between them
+    function sliverD(px, py, sx, sy, cosx, rr, k, e, W, H) {
+      const ex = 2 / Math.max(.5, k || 2), n = 20, P = Math.PI / 2, ccx = px - sx * rr, ccy = py - sy * rr, pts = [[px + sx * e, py + sy * e]];
+      for (let j = 0; j <= n; j++) {
+        const a = j / n * P, c = Math.cos(a) ** ex, s = Math.sin(a) ** ex, q = [ccx + sx * rr * (cosx ? c : s), ccy + sy * rr * (cosx ? s : c)];
+        if (j === 0) { if (cosx) q[0] += sx * e; else q[1] += sy * e; }
+        if (j === n) { if (cosx) q[1] += sy * e; else q[0] += sx * e; }
+        pts.push(q);
+      }
+      pts.reverse();
+      return 'M' + pts.map(([x, y]) => (x / W).toFixed(5) + ' ' + (y / H).toFixed(5)).join('L') + 'Z';
+    }
+    // the glass of a merged shape is drawn ONCE, on a layer behind the members (z -1 inside mg.layer), clipped to the shape. members only keep their css background on top
+    function overlay(mg, mem, m, p, cut, z, W, H, ox, oy, joints) {
+      const lay = mg.layer ? (typeof mg.layer === 'function' ? mg.layer() : typeof mg.layer === 'string' ? document.querySelector(mg.layer) : mg.layer) : mem[0].it.el.parentElement;
+      if (!lay) return false;
+      let base = mg.base == null ? '' : mg.base;
+      for (const q of mem) {
+        const el = q.it.el;
+        clear(q.it);
+        if (mg.base == null && !base) { const b = getComputedStyle(el).backdropFilter; if (b && b !== 'none') base = b; }
+        el.style.setProperty('backdrop-filter', 'none', 'important'); el.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+      }
+      const pr = document.createElement('div');
+      pr.style.cssText = 'position:fixed;left:0;top:0;width:100px;height:1px;visibility:hidden;pointer-events:none';
+      lay.appendChild(pr); const zp = pr.getBoundingClientRect().width / 100 || 1; pr.remove();
+      const u = z / zp, fw = (W * u).toFixed(2), fh = (H * u).toFixed(2), e = 1;
+      const ex = mem.map(() => [0, 0, 0, 0]);
+      for (const j of joints) { const a = mem.indexOf(j.a), b = mem.indexOf(j.b); if (a < 0 || b < 0) continue; if (j.v) { ex[a][2] = e; ex[b][0] = e; } else { ex[a][3] = e; ex[b][1] = e; } }
+      const parts = mem.map((q, i) => seD(q.x - ex[i][0], q.y - ex[i][1], q.w + ex[i][0] + ex[i][2], q.h + ex[i][1] + ex[i][3], q.R, q.R.k, W, H));
+      if (cut && cut.on) cut.cs.forEach(([px, py, sx, sy], i) => { if (cut.on[i]) parts.push(sliverD(px, py, sx, sy, i % 2 ? 0 : 1, cut.R[i], cut.k, e, W, H)); });
+      const d = parts.join(' ');
+      const ovs = mg.ovs || (mg.ovs = []), oi = mg.oi || 0; let ov = ovs[oi];
+      if (!ov || ov.el.parentElement !== lay) {
+        if (ov) { ov.el.remove(); if (ov.f) ov.f.remove(); if (ov.c) ov.c.remove(); }
+        ov = ovs[oi] = { el: document.createElement('div'), f: null, c: null, key: '' };
+        ov.el.className = 'mu-lg-frame'; lay.insertBefore(ov.el, lay.firstChild);
+      }
+      mg.oi = oi + 1;
+      const key = [m.key, p.scale.toFixed(2), u.toFixed(4), fw, fh, ox.toFixed(1), oy.toFixed(1), zp.toFixed(4), base, d].join('|');
+      if (ov.key !== key) {
+        ov.key = key;
+        const id = 'mulgo' + (++S.uid), cid = id + 'c', f = document.createElementNS(NS, 'filter'), c = document.createElementNS(NS, 'clipPath');
+        f.id = id; f.setAttribute('filterUnits', 'userSpaceOnUse'); f.setAttribute('x', 0); f.setAttribute('y', 0); f.setAttribute('width', fw); f.setAttribute('height', fh);
+        f.setAttribute('color-interpolation-filters', 'sRGB');
+        f.innerHTML = `<feImage href="${m.url}" x="0" y="0" width="${fw}" height="${fh}" preserveAspectRatio="none" result="map"/><feDisplacementMap in="SourceGraphic" in2="map" scale="${(p.scale * 2 * u).toFixed(2)}" xChannelSelector="R" yChannelSelector="G"/>`;
+        c.id = cid; c.setAttribute('clipPathUnits', 'objectBoundingBox'); c.innerHTML = '<path d="' + d + '"/>';
+        const h = host(); h.appendChild(f); h.appendChild(c);
+        if (ov.f) ov.f.remove(); if (ov.c) ov.c.remove(); ov.f = f; ov.c = c;
+        const v = (base ? base + ' ' : '') + 'url(#' + id + ')', st = ov.el.style;
+        st.cssText = 'position:fixed;pointer-events:none;z-index:' + (mg.layerZ ?? -1) + ';left:' + (ox / zp).toFixed(2) + 'px;top:' + (oy / zp).toFixed(2) + 'px;width:' + fw + 'px;height:' + fh + 'px;clip-path:url(#' + cid + ');-webkit-clip-path:url(#' + cid + ')';
+        st.setProperty('backdrop-filter', v, 'important'); st.setProperty('-webkit-backdrop-filter', v, 'important');
+      }
+      return true;
+    }
     // glass for the corner gaps: no member covers them, so each one gets a small overlay with the same shared map, clipped to the arc.
     // the overlay box is grown by the push distance so its samples come from the neighbouring panels instead of from nothing
     function patches(mg, mem, m, p, cut, z, W, H, ox, oy) {
@@ -3681,7 +3752,7 @@ void main() {
       });
     }
     function applyMerge(mg, draft) {
-      for (const g of S.merges.values()) if (g !== mg && g.pt && g.groups.some(x => mg.groups.includes(x))) clearPatches(g);
+      for (const g of S.merges.values()) if (g !== mg && (g.pt || (g.ovs && g.ovs.length)) && g.groups.some(x => mg.groups.includes(x))) clearPatches(g);
       const items = [...S.items].filter(i => i.group && mg.groups.includes(i.group) && i.el.isConnected), vis = [], rect = new Map();
       for (const i of items) if (i.el.offsetWidth && i.el.offsetHeight) { vis.push(i); rect.set(i, i.el.getBoundingClientRect()); }
       // members that touch (3px slack) form one component, every component of 2+ becomes a merged shape, the rest stays solo
@@ -3692,10 +3763,10 @@ void main() {
       }
       const comps = new Map(), done = new Set();
       vis.forEach((i, n) => { const k = root(n); if (!comps.has(k)) comps.set(k, []); comps.get(k).push(i); });
-      let built = false;
+      let built = false; mg.oi = 0;
       for (const c of comps.values()) if (c.length > 1 && buildMerged(mg, c, rect, draft)) { c.forEach(i => done.add(i)); built = true; }
       for (const i of items) if (!done.has(i)) applySolo(i);
-      if (!built) clearPatches(mg);
+      trimOverlays(mg);
     }
     function buildMerged(mg, c, rect, draft) {
       // css zoom: rects are visual px, filters live in layout px. measured off the biggest side of any member (or mg.zoom())
@@ -3753,16 +3824,15 @@ void main() {
       for (let a = 0; a < mem.length; a++) for (let b = a + 1; b < mem.length; b++) {
         const A = mem[a], B = mem[b], x0 = Math.max(A.x, B.x), x1 = Math.min(A.x + A.w, B.x + B.w), y0 = Math.max(A.y, B.y), y1 = Math.min(A.y + A.h, B.y + B.h);
         if (x1 - x0 > 2 && y1 - y0 > 2) over.push([A.it.group, B.it.group]);
-        if (y1 - y0 > 2) for (const [lf, rt] of [[A, B], [B, A]]) if (Math.abs(lf.x + lf.w - rt.x) <= jt) joints.push({ v: 1, pos: (lf.x + lf.w + rt.x) / 2, lo: y0, hi: y1 });
-        if (x1 - x0 > 2) for (const [tp, bt] of [[A, B], [B, A]]) if (Math.abs(tp.y + tp.h - bt.y) <= jt) joints.push({ v: 0, pos: (tp.y + tp.h + bt.y) / 2, lo: x0, hi: x1 });
+        if (y1 - y0 > 2) for (const [lf, rt] of [[A, B], [B, A]]) if (Math.abs(lf.x + lf.w - rt.x) <= jt) joints.push({ v: 1, pos: (lf.x + lf.w + rt.x) / 2, lo: y0, hi: y1, a: lf, b: rt });
+        if (x1 - x0 > 2) for (const [tp, bt] of [[A, B], [B, A]]) if (Math.abs(tp.y + tp.h - bt.y) <= jt) joints.push({ v: 0, pos: (tp.y + tp.h + bt.y) / 2, lo: x0, hi: x1, a: tp, b: bt });
       }
-      R.j = joints;
+      R.j = null;
       if (mg.debug) console.log('[lg merge]', mg.key, { z, scale: p.scale, members: mem.map(m => ({ g: m.it.group, x: m.x, y: m.y, w: m.w, h: m.h, ex: m.ex })), cut: cut && { x: cut.x, y: cut.y, w: cut.w, h: cut.h, on: cut.on }, joints, overlaps: over });
       R.uk = 'U' + mem.map(m => [m.x, m.y, m.w, m.h, ...m.R, m.R.k, ...m.ex].join(',')).join(';') + '@' + rEff.toFixed(1) + '|' + cuk + '|' + p.scale.toFixed(1) + '|' + joints.length;
       R.u = (px, py) => (field || (field = unionField(mem, W, H, rEff, p.maxMapPx, null, extra)))(px, py);
       const m = buildMap(p, W, H, R);
-      for (const q of mem) place(q.it, m, p, m.key + '|' + p.scale.toFixed(2) + '|' + q.x + ',' + q.y + '|' + q.ow + 'x' + q.oh, q, W, H);
-      patches(mg, mem, m, p, cut, z, W, H, ox, oy);
+      if (!overlay(mg, mem, m, p, cut, z, W, H, ox, oy, joints)) return false;
       mg.built = true;
       return true;
     }
@@ -3785,7 +3855,7 @@ void main() {
     // merged members go through one pass for the whole shape (refresh() calls this once per member, the microtask collapses them)
     function apply(it) {
       const mg = it.el.isConnected ? mergeOf(it) : null;
-      if (!mg) { for (const g of S.merges.values()) if (g.pt && it.group && g.groups.includes(it.group)) clearPatches(g); applySolo(it); return; }
+      if (!mg) { for (const g of S.merges.values()) if ((g.pt || (g.ovs && g.ovs.length)) && it.group && g.groups.includes(it.group)) clearPatches(g); applySolo(it); return; }
       if (!mg.pend) { mg.pend = true; queueMicrotask(() => { mg.pend = false; applyMerge(mg); }); }
     }
 
