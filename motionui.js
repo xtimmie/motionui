@@ -3462,7 +3462,7 @@ void main() {
         D[i] = 127.5 + 127.5 * dx; D[i + 1] = 127.5 + 127.5 * dy; D[i + 2] = 128; D[i + 3] = 255;
       }
       cx.putImageData(im, 0, 0);
-      m = { url: cv.toDataURL(), mw, mh, key };
+      m = { url: cv.toDataURL(), mw, mh, key, px: R.u ? D : null };
       S.lastMs = performance.now() - t0;
       mcache.set(key, m); if (mcache.size > 24) mcache.delete(mcache.keys().next().value);
       return m;
@@ -3614,7 +3614,66 @@ void main() {
       });
       cx.closePath();
     }
+    // per member copy of the shared map where the push is shortened so the sampled point never leaves that member's own box
+    function memberMap(m, q, W, H, p) {
+      const key = q.x + ',' + q.y + ',' + q.ow + 'x' + q.oh + ',' + p.scale.toFixed(2);
+      if (!m.sub) m.sub = new Map();
+      let u = m.sub.get(key); if (u) return u;
+      const kx = m.mw / W, ky = m.mh / H;
+      const sx = clamp(Math.round(q.x * kx), 0, m.mw - 2), sy = clamp(Math.round(q.y * ky), 0, m.mh - 2);
+      const cw = clamp(Math.round(q.w * kx), 2, m.mw - sx), ch = clamp(Math.round(q.h * ky), 2, m.mh - sy);
+      const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+      const cx = cv.getContext('2d'), im = cx.createImageData(cw, ch), D = im.data, S0 = p.scale, src = m.px;
+      for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+        const si = ((sy + y) * m.mw + sx + x) * 4, i = (y * cw + x) * 4;
+        let dx = (src[si] - 127.5) / 127.5, dy = (src[si + 1] - 127.5) / 127.5;
+        const ux = (x + .5) / cw * q.ow, uy = (y + .5) / ch * q.oh, vx = dx * S0, vy = dy * S0;
+        let t = 1;
+        if (vx > 1e-6) t = Math.min(t, (q.ow - ux) / vx); else if (vx < -1e-6) t = Math.min(t, ux / -vx);
+        if (vy > 1e-6) t = Math.min(t, (q.oh - uy) / vy); else if (vy < -1e-6) t = Math.min(t, uy / -vy);
+        if (t < 1) { t = Math.max(0, t); dx *= t; dy *= t; }
+        D[i] = 127.5 + 127.5 * dx; D[i + 1] = 127.5 + 127.5 * dy; D[i + 2] = 128; D[i + 3] = 255;
+      }
+      cx.putImageData(im, 0, 0); u = cv.toDataURL();
+      m.sub.set(key, u);
+      return u;
+    }
+    // the rounded gap of one cutout corner as a css polygon (px, patch units), sharp corner + the superellipse arc
+    function sliverPoly(i, rr, k, ext, u) {
+      const ex = 2 / Math.max(.5, k || 2), n = 20, P = Math.PI / 2;
+      const C = [[rr, rr, -1, -1, 1], [0, rr, 1, -1, 0], [0, 0, 1, 1, 1], [rr, 0, -1, 1, 0]][i], S0 = [[0, 0], [rr, 0], [rr, rr], [0, rr]][i], pts = [S0];
+      for (let j = 0; j <= n; j++) { const a = j / n * P, c = Math.cos(a) ** ex, s = Math.sin(a) ** ex, ox = rr * (C[4] ? c : s), oy = rr * (C[4] ? s : c); pts.push([C[0] + C[2] * ox, C[1] + C[3] * oy]); }
+      return 'polygon(' + pts.map(([x, y]) => ((x + ext) * u).toFixed(2) + 'px ' + ((y + ext) * u).toFixed(2) + 'px').join(',') + ')';
+    }
+    function clearPatches(mg) { if (mg.pt) { for (const q of mg.pt) { q.el.remove(); q.f.remove(); } mg.pt = null; } }
+    // glass for the corner gaps: no member covers them, so each one gets a small overlay with the same shared map, clipped to the arc.
+    // the overlay box is grown by the push distance so its samples come from the neighbouring panels instead of from nothing
+    function patches(mg, mem, m, p, cut, z, W, H, ox, oy) {
+      clearPatches(mg);
+      if (!cut || !cut.on || !cut.on.some(Boolean) || !m.url) return;
+      const pr = document.createElement('div');
+      pr.style.cssText = 'position:fixed;left:0;top:0;width:100px;height:1px;visibility:hidden;pointer-events:none';
+      document.body.appendChild(pr); const zp = pr.getBoundingClientRect().width / 100 || 1; pr.remove();
+      let base = '';
+      for (const q of mem) { const s = q.it.el.style.getPropertyValue('backdrop-filter').replace(/\s*url\(#mulg\d+\)\s*$/, '').trim(); if (s) { base = s; break; } }
+      const u = z / zp, ext = Math.ceil(p.scale) + 2; mg.pt = [];
+      cut.cs.forEach(([px, py, sx, sy], i) => {
+        if (!cut.on[i]) return;
+        const rr = cut.R[i], gx = (sx < 0 ? px : px - rr) - ext, gy = (sy < 0 ? py : py - rr) - ext, gs = (rr + 2 * ext) * u, id = 'mulgp' + (++S.uid);
+        const f = document.createElementNS(NS, 'filter'), el = document.createElement('div');
+        f.id = id; f.setAttribute('filterUnits', 'userSpaceOnUse');
+        f.setAttribute('x', 0); f.setAttribute('y', 0); f.setAttribute('width', gs.toFixed(2)); f.setAttribute('height', gs.toFixed(2));
+        f.setAttribute('color-interpolation-filters', 'sRGB');
+        f.innerHTML = `<feImage href="${m.url}" x="${(-gx * u).toFixed(2)}" y="${(-gy * u).toFixed(2)}" width="${(W * u).toFixed(2)}" height="${(H * u).toFixed(2)}" preserveAspectRatio="none" result="map"/><feDisplacementMap in="SourceGraphic" in2="map" scale="${(p.scale * 2 * u).toFixed(2)}" xChannelSelector="R" yChannelSelector="G"/>`;
+        host().appendChild(f);
+        const v = (base ? base + ' ' : '') + 'url(#' + id + ')';
+        el.style.cssText = 'position:fixed;pointer-events:none;z-index:2;left:' + ((ox + gx * z) / zp).toFixed(2) + 'px;top:' + ((oy + gy * z) / zp).toFixed(2) + 'px;width:' + gs.toFixed(2) + 'px;height:' + gs.toFixed(2) + 'px;clip-path:' + sliverPoly(i, rr, cut.k, ext, u);
+        el.style.setProperty('backdrop-filter', v, 'important'); el.style.setProperty('-webkit-backdrop-filter', v, 'important');
+        document.body.appendChild(el); mg.pt.push({ el, f });
+      });
+    }
     function applyMerge(mg, draft) {
+      for (const g of S.merges.values()) if (g !== mg && g.pt && g.groups.some(x => mg.groups.includes(x))) clearPatches(g);
       const items = [...S.items].filter(i => i.group && mg.groups.includes(i.group) && i.el.isConnected), vis = [], rect = new Map();
       for (const i of items) if (i.el.offsetWidth && i.el.offsetHeight) { vis.push(i); rect.set(i, i.el.getBoundingClientRect()); }
       // members that touch (3px slack) form one component, every component of 2+ becomes a merged shape, the rest stays solo
@@ -3625,8 +3684,10 @@ void main() {
       }
       const comps = new Map(), done = new Set();
       vis.forEach((i, n) => { const k = root(n); if (!comps.has(k)) comps.set(k, []); comps.get(k).push(i); });
-      for (const c of comps.values()) if (c.length > 1 && buildMerged(mg, c, rect, draft)) c.forEach(i => done.add(i));
+      let built = false;
+      for (const c of comps.values()) if (c.length > 1 && buildMerged(mg, c, rect, draft)) { c.forEach(i => done.add(i)); built = true; }
       for (const i of items) if (!done.has(i)) applySolo(i);
+      if (!built) clearPatches(mg);
     }
     function buildMerged(mg, c, rect, draft) {
       // css zoom: rects are visual px, filters live in layout px. measured off the biggest side of any member (or mg.zoom())
@@ -3656,6 +3717,7 @@ void main() {
         const inM = (x, y) => mem.some(m => x >= m.x - 1 && x <= m.x + m.w + 1 && y >= m.y - 1 && y <= m.y + m.h + 1);
         const cs = [[cut.x, cut.y, -1, -1], [cut.x + cut.w, cut.y, 1, -1], [cut.x + cut.w, cut.y + cut.h, 1, 1], [cut.x, cut.y + cut.h, -1, 1]];
         const on = cs.map(([px, py, sx, sy], i) => cut.R[i] > .5 && inM(px + sx * 3, py - sy * 3) && inM(px - sx * 3, py + sy * 3));
+        cut.cs = cs; cut.on = on;
         cuk = [cut.x, cut.y, cut.w, cut.h, ...cut.R, cut.k, ...on.map(Number)].join(',');
         extra = (cx, ku, pd, path) => {
           cs.forEach(([px, py, sx, sy], i) => {
@@ -3681,6 +3743,7 @@ void main() {
       R.u = (px, py) => (field || (field = unionField(mem, W, H, rEff, p.maxMapPx, null, extra)))(px, py);
       const m = buildMap(p, W, H, R);
       for (const q of mem) place(q.it, m, p, m.key + '|' + p.scale.toFixed(2) + '|' + q.x + ',' + q.y + '|' + q.ow + 'x' + q.oh, q, W, H);
+      patches(mg, mem, m, p, cut, z, W, H, ox, oy);
       mg.built = true;
       return true;
     }
@@ -3694,7 +3757,7 @@ void main() {
         f.id = id; f.setAttribute('filterUnits', 'userSpaceOnUse');
         f.setAttribute('x', 0); f.setAttribute('y', 0); f.setAttribute('width', q.ow); f.setAttribute('height', q.oh);
         f.setAttribute('color-interpolation-filters', 'sRGB');
-        f.innerHTML = `<feImage href="${m.url}" x="${-q.x}" y="${-q.y}" width="${W}" height="${H}" preserveAspectRatio="none" result="map"/><feDisplacementMap in="SourceGraphic" in2="map" scale="${(p.scale * 2).toFixed(2)}" xChannelSelector="R" yChannelSelector="G"/>`;
+        f.innerHTML = `<feImage href="${memberMap(m, q, W, H, p)}" x="0" y="0" width="${q.ow}" height="${q.oh}" preserveAspectRatio="none" result="map"/><feDisplacementMap in="SourceGraphic" in2="map" scale="${(p.scale * 2).toFixed(2)}" xChannelSelector="R" yChannelSelector="G"/>`;
         host().appendChild(f); if (it.f) it.f.remove(); it.f = f; it.fk = fk;
       }
       const v = (base ? base + ' ' : '') + 'url(#' + it.f.id + ')';
@@ -3703,7 +3766,7 @@ void main() {
     // merged members go through one pass for the whole shape (refresh() calls this once per member, the microtask collapses them)
     function apply(it) {
       const mg = it.el.isConnected ? mergeOf(it) : null;
-      if (!mg) { applySolo(it); return; }
+      if (!mg) { for (const g of S.merges.values()) if (g.pt && it.group && g.groups.includes(it.group)) clearPatches(g); applySolo(it); return; }
       if (!mg.pend) { mg.pend = true; queueMicrotask(() => { mg.pend = false; applyMerge(mg); }); }
     }
 
