@@ -2090,6 +2090,12 @@ void main() {
         el.addEventListener('transitionend', onEnd);
         setTimeout(settle, dur + 150); // fallback if transitionend never fires (interrupted, reduced motion)
       } else {
+        // the host may take over the snap back with its own spring: el._sheetRelease(dy px, speed px/ms) returns true when it did
+        if (dy > 0 && typeof el._sheetRelease === 'function' && el._sheetRelease(dy / zk, (performance.now() - lastT > 100 ? 0 : velocity) / zk)) {
+          const bd0 = resolveBackdrop(el);
+          if (bd0) { bd0.style.transition = ''; bd0.style.opacity = ''; } // backdrop fades back in while the sheet springs
+          return;
+        }
         el.style.transition = '';
         el.style.transformOrigin = 'bottom';
         el.style.transform = '';
