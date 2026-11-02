@@ -3377,7 +3377,7 @@ void main() {
       concave:   { profile: 'concave', thick: 1.2, bevel: 70, scale: 50 },
       reference: { relBevel: false, bevel: 83, relScale: false, scale: 80 },
     };
-    const S = { on: false, params: {}, q: 0, groups: new Map(), items: new Set(), host: null, uid: 0, mo: null, raf: 0, rp: 0, sq: 0, gt: 0, lastMs: 0 };
+    const S = { on: false, params: {}, q: 0, groups: new Map(), merges: new Map(), items: new Set(), host: null, uid: 0, mo: null, raf: 0, rp: 0, sq: 0, gt: 0, lastMs: 0 };
     const byEl = new WeakMap(), mcache = new Map(), lcache = new Map();
 
     function lut(v) {
@@ -3402,9 +3402,9 @@ void main() {
       const mw = Math.max(2, Math.ceil(w * k)), mh = Math.max(2, Math.ceil(h * k));
       const K = Math.max(1, R.k || 2);
       // seam smoothing: the unit normal field gets blurred (radius rad in map px) so creases fade out softly, 0 = hard
-      let tau = Math.max(0, +p.soft || 0) * Math.min(w, h) / 2; if (tau < .5) tau = 0;
+      let tau = Math.max(0, +p.soft || 0) * (R.mh || Math.min(w, h) / 2); if (tau < .5) tau = 0;
       const rad = tau ? Math.max(1, Math.round(tau * .75 * mw / w)) : 0;
-      const key = [w, h, R.join(','), K, p.profile, p.ior, p.thick, p.bevel.toFixed(2), p.edgePow, p.invert ? 1 : 0, tau.toFixed(1), mw, mh].join('|');
+      const key = [w, h, R.join(','), R.uk || '', K, p.profile, p.ior, p.thick, p.bevel.toFixed(2), p.edgePow, p.invert ? 1 : 0, tau.toFixed(1), mw, mh].join('|');
       let m = mcache.get(key);
       if (m) { mcache.delete(key); mcache.set(key, m); return m; }
       const t0 = performance.now();
@@ -3431,10 +3431,12 @@ void main() {
       // smoothing: the unit normal field gets blurred (not the distance), so where normals disagree (creases, inner corner points)
       // the push fades to 0 smoothly. straight edges stay at full strength. distance stays sharp and only drives the strength lut
       const spx = w / mw, spy = h / mh; // css px per map px
+      // merged shape: distance + normal come from the precomputed union field instead of the rounded rect formula
+      const usdf = R.u ? (px, py) => { const q = R.u(px + hw, py + hh); _nx = q[1]; _ny = q[2]; return q[0]; } : null;
       const pad = rad ? 2 * rad + 2 : 0, gw = mw + 2 * pad, gh = mh + 2 * pad;
       const NX = new Float32Array(gw * gh), NY = new Float32Array(gw * gh), DD = new Float32Array(mw * mh);
       for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
-        const d = sdf((x - pad + .5) * spx - hw, (y - pad + .5) * spy - hh), gi = y * gw + x;
+        const d = (usdf || sdf)((x - pad + .5) * spx - hw, (y - pad + .5) * spy - hh), gi = y * gw + x;
         NX[gi] = _nx; NY[gi] = _ny;
         if (x >= pad && y >= pad && x < pad + mw && y < pad + mh) DD[(y - pad) * mw + x - pad] = d;
       }
@@ -3522,9 +3524,142 @@ void main() {
       it.el.style.removeProperty('backdrop-filter'); it.el.style.removeProperty('-webkit-backdrop-filter');
       if (it.f) { it.f.remove(); it.f = null; it.fk = null; }
     }
-    function drop(it) { clear(it); it.ro.disconnect(); clearTimeout(it.t); S.items.delete(it); byEl.delete(it.el); }
+    function drop(it) { clear(it); it.ro.disconnect(); clearTimeout(it.t); S.items.delete(it); byEl.delete(it.el); const mg = mergeOf(it); if (mg) mergeKick(mg); }
 
+    // exact squared euclidean distance (felzenszwalb) to the nearest site (sites[i] = 1), grid gw x gh
+    function edt(sites, gw, gh) {
+      const INF = 1e12, out = new Float32Array(gw * gh), n = Math.max(gw, gh), f = new Float64Array(n), d = new Float64Array(n), v = new Int32Array(n), z = new Float64Array(n + 1);
+      const run = len => {
+        let k = 0; v[0] = 0; z[0] = -INF; z[1] = INF;
+        for (let q = 1; q < len; q++) {
+          let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+          while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+          k++; v[k] = q; z[k] = s; z[k + 1] = INF;
+        }
+        k = 0;
+        for (let q = 0; q < len; q++) { while (z[k + 1] < q) k++; d[q] = (q - v[k]) ** 2 + f[v[k]]; }
+      };
+      for (let x = 0; x < gw; x++) { for (let y = 0; y < gh; y++) f[y] = sites[y * gw + x] ? 0 : INF; run(gh); for (let y = 0; y < gh; y++) out[y * gw + x] = d[y]; }
+      for (let y = 0; y < gh; y++) { for (let x = 0; x < gw; x++) f[x] = out[y * gw + x]; run(gw); for (let x = 0; x < gw; x++) out[y * gw + x] = d[x]; }
+      return out;
+    }
+    // signed distance field (css px, positive inside) of the union of mem = [{x,y,w,h,R}] after a morphological closing of radius r:
+    // dilate by r, erode by r, so concave joints turn into fillets of radius r and gaps under 2r get bridged. returns a sampler (px,py) -> [dist, outwardNx, outwardNy]
+    function unionField(mem, W, H, r, cap, raster) {
+      const ku = Math.min(1, Math.sqrt(cap / (W * H))), rp = r * ku, pd = Math.ceil(rp) + 3;
+      const gw = Math.ceil(W * ku) + 2 * pd, gh = Math.ceil(H * ku) + 2 * pd, N = gw * gh, M = new Uint8Array(N);
+      if (raster) raster(M, gw, gh, ku, pd);
+      else {
+        const cv = document.createElement('canvas'); cv.width = gw; cv.height = gh;
+        const cx = cv.getContext('2d', { willReadFrequently: true });
+        cx.beginPath();
+        for (const m of mem) { const a = pd + m.x * ku, b = pd + m.y * ku, c = m.w * ku, d = m.h * ku; if (cx.roundRect) cx.roundRect(a, b, c, d, m.R.map(q => q * ku)); else cx.rect(a, b, c, d); }
+        cx.fill();
+        const px = cx.getImageData(0, 0, gw, gh).data;
+        for (let i = 0; i < N; i++) M[i] = px[i * 4 + 3] > 127 ? 1 : 0;
+      }
+      let D = M;
+      if (rp > 0) { const d1 = edt(M, gw, gh), lim = (rp + .5) ** 2; D = new Uint8Array(N); for (let i = 0; i < N; i++) D[i] = d1[i] <= lim ? 1 : 0; }
+      const nD = new Uint8Array(N); for (let i = 0; i < N; i++) nD[i] = D[i] ? 0 : 1;
+      const d2 = edt(nD, gw, gh), C = new Uint8Array(N), F = new Float32Array(N);
+      for (let i = 0; i < N; i++) if (D[i]) { const dd = Math.sqrt(d2[i]) - .5 - rp; F[i] = dd; C[i] = dd >= 0 ? 1 : 0; }
+      const d3 = edt(C, gw, gh);
+      for (let i = 0; i < N; i++) if (!C[i]) F[i] = -(Math.sqrt(d3[i]) - .5);
+      // outward normal = -grad(dist). the central difference of a unit gradient field is 2 long, it shrinks towards the medial axis where the push is ~0 anyway
+      const GX = new Float32Array(N), GY = new Float32Array(N);
+      for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+        const i = y * gw + x, gx = F[y * gw + Math.min(gw - 1, x + 1)] - F[y * gw + Math.max(0, x - 1)], gy = F[Math.min(gh - 1, y + 1) * gw + x] - F[Math.max(0, y - 1) * gw + x], l = Math.max(2, Math.hypot(gx, gy));
+        GX[i] = -gx / l; GY[i] = -gy / l;
+      }
+      const cw = gw - 1, ch = gh - 1, o = [0, 0, 0];
+      return (px, py) => {
+        const fx = clamp(px * ku + pd - .5, 0, cw), fy = clamp(py * ku + pd - .5, 0, ch), x0 = fx | 0, y0 = fy | 0, x1 = Math.min(cw, x0 + 1), y1 = Math.min(ch, y0 + 1), tx = fx - x0, ty = fy - y0;
+        const b = A => (A[y0 * gw + x0] * (1 - tx) + A[y0 * gw + x1] * tx) * (1 - ty) + (A[y1 * gw + x0] * (1 - tx) + A[y1 * gw + x1] * tx) * ty;
+        o[0] = b(F) / ku; o[1] = b(GX); o[2] = b(GY);
+        return o;
+      };
+    }
+    // merged shapes. merge(key, { groups: [group keys], radius: px | '--css-var' | fn(el), when: () => bool })
+    // the visible members of those groups that touch each other become ONE shape: one map from the closed union
+    // (concave joints get a fillet of `radius`), every member's filter shows its own slice of that map
+    function mergeOf(it) {
+      if (!S.merges.size || !it.group) return null;
+      for (const g of S.merges.values()) if (g.enabled !== false && g.groups.includes(it.group) && (!g.when || g.when())) return g;
+      return null;
+    }
+    function mergeKick(mg) {
+      const now = performance.now(), gap = now - mg.lastEv;
+      mg.lastEv = now; clearTimeout(mg.t);
+      // changes arriving back to back (window drag, sidebar animating): cheap low res draft now and then, full res once it settles
+      if (mg.built && gap < 120 && now - mg.draftAt > 90) { mg.draftAt = now; applyMerge(mg, true); }
+      mg.t = setTimeout(() => applyMerge(mg), mg.built ? (gap < 120 ? 140 : 40) : 0);
+    }
+    function applyMerge(mg, draft) {
+      const items = [...S.items].filter(i => i.group && mg.groups.includes(i.group) && i.el.isConnected), vis = [], rect = new Map();
+      for (const i of items) if (i.el.offsetWidth && i.el.offsetHeight) { vis.push(i); rect.set(i, i.el.getBoundingClientRect()); }
+      // members that touch (3px slack) form one component, every component of 2+ becomes a merged shape, the rest stays solo
+      const par = vis.map((_, n) => n), root = n => par[n] === n ? n : (par[n] = root(par[n])), tol = 3;
+      for (let a = 0; a < vis.length; a++) for (let b = a + 1; b < vis.length; b++) {
+        const A = rect.get(vis[a]), B = rect.get(vis[b]);
+        if (A.left <= B.right + tol && B.left <= A.right + tol && A.top <= B.bottom + tol && B.top <= A.bottom + tol) par[root(a)] = root(b);
+      }
+      const comps = new Map(), done = new Set();
+      vis.forEach((i, n) => { const k = root(n); if (!comps.has(k)) comps.set(k, []); comps.get(k).push(i); });
+      for (const c of comps.values()) if (c.length > 1 && buildMerged(mg, c, rect, draft)) c.forEach(i => done.add(i));
+      for (const i of items) if (!done.has(i)) applySolo(i);
+    }
+    function buildMerged(mg, c, rect, draft) {
+      // css zoom: rects are visual px, filters live in layout px. measured off the biggest side of any member (or mg.zoom())
+      let z = 1, best = 0;
+      for (const i of c) { const r = rect.get(i); if (i.el.offsetWidth > best) { best = i.el.offsetWidth; z = r.width / best; } if (i.el.offsetHeight > best) { best = i.el.offsetHeight; z = r.height / best; } }
+      z = mg.zoom ? (+mg.zoom() || 1) : Math.round(z * 1000) / 1000;
+      if (!(z > .05) || Math.abs(z - 1) < .004) z = 1;
+      const ox = Math.min(...c.map(i => rect.get(i).left)), oy = Math.min(...c.map(i => rect.get(i).top)), f1 = v => Math.round(v * 10) / 10;
+      const mem = c.map(it => {
+        const el = it.el, r = rect.get(it), w = Math.round(el.offsetWidth), h = Math.round(el.offsetHeight);
+        it.pb = Math.max(0, Math.min(h - 2, parseFloat(getComputedStyle(el).getPropertyValue('--lg-pad')) || 0));
+        return { it, w: f1(r.width / z), h: f1(r.height / z), x: f1((r.left - ox) / z), y: f1((r.top - oy) / z), ow: w, oh: h, R: radii(el, w, h) };
+      });
+      const W = Math.max(...mem.map(m => m.x + m.w)), H = Math.max(...mem.map(m => m.y + m.h));
+      const rv = typeof mg.radius === 'function' ? mg.radius(c[0].el) : typeof mg.radius === 'string' ? parseFloat(getComputedStyle(c[0].el).getPropertyValue(mg.radius)) : +mg.radius;
+      const r = clamp(rv || 0, 0, 300), d = Math.max(2, Math.min(...mem.map(m => Math.min(m.w, m.h - m.it.pb))));
+      // one set of params for the whole shape, sized off its thinnest member so the rim has the same width all the way around
+      const p = resolve({ pb: 0, own: null }, d, d);
+      if (p.maxArea > 0 && mem.reduce((s, m) => s + m.w * m.h, 0) > p.maxArea) return false;
+      p.maxMapPx = draft ? Math.min(p.maxMapPx || 45000, 45000) : (p.maxMapPx || 160000) * 2;
+      let field = null;
+      const R = [0, 0, 0, 0]; R.k = 2; R.mh = d / 2;
+      R.uk = 'U' + mem.map(m => [m.x, m.y, m.w, m.h, ...m.R].join(',')).join(';') + '@' + r.toFixed(1);
+      R.u = (px, py) => (field || (field = unionField(mem, W, H, r, p.maxMapPx)))(px, py);
+      const m = buildMap(p, W, H, R);
+      for (const q of mem) place(q.it, m, p, m.key + '|' + p.scale.toFixed(2) + '|' + q.x + ',' + q.y + '|' + q.ow + 'x' + q.oh, q, W, H);
+      mg.built = true;
+      return true;
+    }
+    // same tail as applySolo, but the feImage is the shared map shifted back by where this member sits inside the shape
+    function place(it, m, p, fk, q, W, H) {
+      const el = it.el;
+      el.style.removeProperty('backdrop-filter'); el.style.removeProperty('-webkit-backdrop-filter');
+      let base = getComputedStyle(el).backdropFilter; if (!base || base === 'none') base = '';
+      if (it.fk !== fk) {
+        const id = 'mulg' + (++S.uid), f = document.createElementNS(NS, 'filter');
+        f.id = id; f.setAttribute('filterUnits', 'userSpaceOnUse');
+        f.setAttribute('x', 0); f.setAttribute('y', 0); f.setAttribute('width', q.ow); f.setAttribute('height', q.oh);
+        f.setAttribute('color-interpolation-filters', 'sRGB');
+        f.innerHTML = `<feImage href="${m.url}" x="${-q.x}" y="${-q.y}" width="${W}" height="${H}" preserveAspectRatio="none" result="map"/><feDisplacementMap in="SourceGraphic" in2="map" scale="${(p.scale * 2).toFixed(2)}" xChannelSelector="R" yChannelSelector="G"/>`;
+        host().appendChild(f); if (it.f) it.f.remove(); it.f = f; it.fk = fk;
+      }
+      const v = (base ? base + ' ' : '') + 'url(#' + it.f.id + ')';
+      el.style.setProperty('backdrop-filter', v, 'important'); el.style.setProperty('-webkit-backdrop-filter', v, 'important');
+    }
+    // merged members go through one pass for the whole shape (refresh() calls this once per member, the microtask collapses them)
     function apply(it) {
+      const mg = it.el.isConnected ? mergeOf(it) : null;
+      if (!mg) { applySolo(it); return; }
+      if (!mg.pend) { mg.pend = true; queueMicrotask(() => { mg.pend = false; applyMerge(mg); }); }
+    }
+
+    function applySolo(it) {
       const el = it.el;
       if (!el.isConnected) { drop(it); return; }
       const w = Math.round(el.offsetWidth), h = Math.round(el.offsetHeight);
@@ -3553,7 +3688,7 @@ void main() {
       let it = byEl.get(el);
       if (it) { if (o.own !== undefined) { it.own = o.own; refreshPreviews(); } return it; }
       it = { el, group: o.group || null, own: o.own || null, f: null, fk: null, t: 0 };
-      it.ro = new ResizeObserver(() => { clearTimeout(it.t); it.t = setTimeout(() => apply(it), it.fk ? 90 : 0); });
+      it.ro = new ResizeObserver(() => { const mg = mergeOf(it); if (mg) { mergeKick(mg); return; } clearTimeout(it.t); it.t = setTimeout(() => apply(it), it.fk ? 90 : 0); });
       it.ro.observe(el); S.items.add(it); byEl.set(el, it);
       return it;
     }
@@ -3581,6 +3716,9 @@ void main() {
 
     if (supported) {
       document.addEventListener('mu:designchange', () => setTimeout(refresh, 60));
+      // a member sliding into place (transform) doesnt resize, so no ResizeObserver tick. rebuild the shape once it lands
+      const landed = e => { const it = S.merges.size && byEl.get(e.target), mg = it && mergeOf(it); if (mg) mergeKick(mg); };
+      document.addEventListener('transitionend', landed, true); document.addEventListener('animationend', landed, true);
       let ht = 0;
       new MutationObserver(() => { clearTimeout(ht); ht = setTimeout(refresh, 120); }).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-mu-design'] });
     }
@@ -3604,6 +3742,14 @@ void main() {
         return g;
       },
       removeGroup(key) { S.groups.delete(key); sync(); },
+      merge(key, o = {}) {
+        const g = S.merges.get(key) || { key, groups: [], radius: 0, t: 0, lastEv: 0, draftAt: 0, built: false, sig: '' };
+        Object.assign(g, o); S.merges.set(key, g);
+        const sig = JSON.stringify([g.groups, typeof g.radius === 'function' ? 'fn' : g.radius, g.enabled !== false]);
+        if (g.sig !== sig) { g.sig = sig; refresh(); }
+        return g;
+      },
+      removeMerge(key) { S.merges.delete(key); refresh(); },
       attach(el, o = {}) {
         if (!supported) return { update() {}, detach() {} };
         const it = track(el, { own: o.params || null });
