@@ -2128,10 +2128,12 @@ void main() {
     el.addEventListener('touchmove', e => {
       const y = e.touches[0].clientY;
       if (!dragging) {
+        // inside a scroller the drag may only start from a gesture the browser has not claimed: while the list is scrolled or the finger moves up the
+        // start point keeps following the finger, so reaching the top mid scroll never turns into a sheet drag on top of the scroll
+        if (touchScroller && (touchScroller.scrollTop > 0 || y <= bodyTouchStartY)) { bodyTouchStartY = y; return; }
         const dy = y - bodyTouchStartY;
         if (Math.abs(dy) < BODY_THRESHOLD) return;
-        // inside a scroller: pulling down only takes over at the very top, pulling up never does
-        if (touchScroller && (dy < 0 || touchScroller.scrollTop > 0)) return;
+        if (touchScroller && !e.cancelable) { bodyTouchStartY = y; return; } // the browser already owns this scroll
         beginDrag(y);
       }
       if (e.cancelable) e.preventDefault();
@@ -3207,7 +3209,7 @@ void main() {
     const fp  = bar.querySelector('.mu-ptr-fp');
     const txt = bar.querySelector('.mu-ptr-txt');
 
-    let startY = 0, curDrag = 0, active = false, syncing = false, pid = null, raf = null;
+    let startY = 0, curDrag = 0, active = false, syncing = false, pid = null, raf = null, pulling = false;
 
     function dragToH(dy) {
       if (dy <= barHeight) return (dy / barHeight) * barHeight;
@@ -3297,14 +3299,20 @@ void main() {
     // detection and browsers often skip pointerdown entirely on scroll elements
     el.addEventListener('touchstart', e => {
       if (!canStart()) return;
-      startY = e.touches[0].clientY; curDrag = 0; active = true;
+      startY = e.touches[0].clientY; curDrag = 0; active = true; pulling = false;
       raf = requestAnimationFrame(dragLoop);
     }, { passive: true });
     el.addEventListener('touchmove', e => {
       if (!active) return;
-      const dy = e.touches[0].clientY - startY;
-      if (dy > 0) e.preventDefault();   // block scroll only while pulling down
-      curDrag = Math.max(0, dy);
+      const y = e.touches[0].clientY;
+      if (!pulling) {
+        // not pulling yet: the list may have scrolled since touchstart, so only take over once it is back at the top and the finger moves down from there
+        if (el.scrollTop > 2 || y <= startY) { startY = y; curDrag = 0; return; }
+        if (!e.cancelable) { active = false; release(false); curDrag = 0; return; } // the browser already owns this scroll, never fight it
+        pulling = true;
+      }
+      e.preventDefault();               // we own the gesture until release, so the list never scrolls under a pull
+      curDrag = Math.max(0, y - startY);
     }, { passive: false });
     el.addEventListener('touchend', e => {
       if (!active) return;
