@@ -3405,7 +3405,7 @@ void main() {
       let tau = Math.max(0, +p.soft || 0) * (R.mh || Math.min(w, h) / 2); if (tau < .5) tau = 0;
       const rad = tau ? Math.max(1, Math.round(tau * .75 * mw / w)) : 0;
       const key = [w, h, R.join(','), R.uk || '', K, p.profile, p.ior, p.thick, p.bevel.toFixed(2), p.edgePow, p.invert ? 1 : 0, tau.toFixed(1), mw, mh].join('|');
-      let m = mcache.get(key);
+      let m = p.keepCv ? null : mcache.get(key);
       if (m) { mcache.delete(key); mcache.set(key, m); return m; }
       const t0 = performance.now();
       const cv = document.createElement('canvas'); cv.width = mw; cv.height = mh;
@@ -3470,7 +3470,8 @@ void main() {
         D[i] = 127.5 + 127.5 * dx; D[i + 1] = 127.5 + 127.5 * dy; D[i + 2] = 128; D[i + 3] = 255;
       }
       cx.putImageData(im, 0, 0);
-      m = { url: cv.toDataURL(), mw, mh, key };
+      m = { url: p.keepCv ? '' : cv.toDataURL(), mw, mh, key };
+      if (p.keepCv) m.cv = cv; // sliceMap composes from the canvas directly, no png round trip
       S.lastMs = performance.now() - t0;
       if (!p.draft) { mcache.set(key, m); if (mcache.size > 24) mcache.delete(mcache.keys().next().value); } // live drafts are one shot, they must not evict the real maps
       return m;
@@ -3826,7 +3827,8 @@ void main() {
       // one set of params for the whole shape, sized off its thinnest member so the rim has the same width all the way around
       const p = resolve({ pb: 0, own: null }, d, d);
       if (p.maxArea > 0 && mem.reduce((s, m) => s + m.w * m.h, 0) > p.maxArea) return false;
-      p.maxMapPx = draft ? Math.min(p.maxMapPx || 45000, S.live ? (S.dpx || 45000) : 45000) : (p.maxMapPx || 160000) * 2;
+      const fcap = (p.maxMapPx || 160000) * 2;
+      p.maxMapPx = draft ? (S.live ? Math.min(fcap, Math.max(S.dpx || 45000, fcap * S.live.floor)) : Math.min(p.maxMapPx || 45000, 45000)) : fcap;
       p.draft = !!(draft && S.live);
       let field = null;
       const rEff = cut ? Math.min(mg.close ?? 2, r) : r;
@@ -3871,6 +3873,34 @@ void main() {
       if (!mg.pend) { mg.pend = true; queueMicrotask(() => { mg.pend = false; applyMerge(mg); }); }
     }
 
+    // live drafts of a plain rounded rect: the map is constant along every straight edge, so the 4 corners are built once on a small stand in
+    // panel (same params, same smoothing) and 1px strips are stretched between them. same pixels as buildMap at the same resolution, but the cost
+    // follows the corner size instead of the panel size. returns null when it doesnt apply (merged shape, tiny panel, very coarse map)
+    function sliceMap(p, w, h, R) {
+      if (R.u || R.j) return null;
+      let k = clamp(p.mapRes, .1, 1);
+      if (p.maxMapPx > 0) k = Math.min(k, Math.sqrt(p.maxMapPx / (w * h)));
+      if (k < .2) return null;
+      const mw = Math.max(2, Math.ceil(w * k)), mh = Math.max(2, Math.ceil(h * k));
+      const mhh = R.mh || Math.min(w, h) / 2, tau = Math.max(0, +p.soft || 0) * mhh;
+      const c = Math.max(Math.max(...R) + 1.6 * tau, p.bevel) + 6, rw = 2 * c + 16; // corner tile (css px), stand in panel size
+      if (w <= rw || h <= rw) return null;
+      const R2 = R.slice(); R2.k = R.k; R2.mh = mhh;
+      const rm = buildMap({ ...p, mapRes: k, maxMapPx: 0, draft: true, keepCv: true }, rw, rw, R2), sc = rm.cv, sw = rm.mw, sh = rm.mh, L = Math.round(c * k);
+      if (!sc || 2 * L + 2 > sw || 2 * L + 2 > sh || 2 * L + 2 > mw || 2 * L + 2 > mh) return null;
+      const mx = sw >> 1, my = sh >> 1, cv = document.createElement('canvas'); cv.width = mw; cv.height = mh;
+      const cx = cv.getContext('2d'); cx.imageSmoothingEnabled = false;
+      cx.drawImage(sc, 0, 0, L, L, 0, 0, L, L);
+      cx.drawImage(sc, sw - L, 0, L, L, mw - L, 0, L, L);
+      cx.drawImage(sc, 0, sh - L, L, L, 0, mh - L, L, L);
+      cx.drawImage(sc, sw - L, sh - L, L, L, mw - L, mh - L, L, L);
+      cx.drawImage(sc, mx, 0, 1, L, L, 0, mw - 2 * L, L);
+      cx.drawImage(sc, mx, sh - L, 1, L, L, mh - L, mw - 2 * L, L);
+      cx.drawImage(sc, 0, my, L, 1, 0, L, L, mh - 2 * L);
+      cx.drawImage(sc, sw - L, my, L, 1, mw - L, L, L, mh - 2 * L);
+      cx.drawImage(sc, mx, my, 1, 1, L, L, mw - 2 * L, mh - 2 * L);
+      return { url: cv.toDataURL(), mw, mh, key: ['S', w, h, R.join(','), R.k || '', p.profile, p.ior, p.thick, p.bevel.toFixed(2), p.edgePow, p.invert ? 1 : 0, mw, mh].join('|') };
+    }
     function soloLive(it) {
       const t0 = performance.now(); applySolo(it, true); liveAdapt(performance.now() - t0);
       clearTimeout(it.t); it.t = setTimeout(() => apply(it), S.live.settle);
@@ -3883,9 +3913,11 @@ void main() {
       // --lg-pad = px of the element's height that sit offscreen at the bottom, the glass math only uses the visible part
       it.pb = Math.max(0, Math.min(h - 2, parseFloat(getComputedStyle(el).getPropertyValue('--lg-pad')) || 0));
       const p = resolve(it, w, h);
-      if (draft) { p.maxMapPx = Math.min(p.maxMapPx || 160000, S.dpx || 40000); p.draft = true; }
+      const R0 = radii(el, w, h);
+      let fast = null;
+      if (draft) { fast = sliceMap(p, w, h, R0); const F = p.maxMapPx || 160000; p.maxMapPx = Math.min(F, Math.max(S.dpx || 40000, F * S.live.floor)); p.draft = true; }
       if (p.maxArea > 0 && w * h > p.maxArea) { clear(it); return; }
-      const m = buildMap(p, w, h, radii(el, w, h)), fk = m.key + '|' + p.scale.toFixed(2);
+      const m = fast || buildMap(p, w, h, R0), fk = m.key + '|' + p.scale.toFixed(2);
       // read what the stylesheet wants first (blur/saturate/brightness...), then put url() behind it. important so it also survives mu-noblur
       el.style.removeProperty('backdrop-filter'); el.style.removeProperty('-webkit-backdrop-filter');
       let base = getComputedStyle(el).backdropFilter; if (!base || base === 'none') base = '';
@@ -3953,7 +3985,7 @@ void main() {
       enable(on = true) { S.on = !!on; sync(); },
       configure({ params, quality, live } = {}) {
         // live: opt in, { budget: ms one draft rebuild may take (draft resolution adapts to it), settle: ms after the last resize until the full res map is built }. null/false = off
-        if (live !== undefined) { const l = live === true ? {} : live; S.live = l ? { budget: clamp(+l.budget || 6, 1, 50), settle: clamp(l.settle ?? 60, 0, 1000) } : null; }
+        if (live !== undefined) { const l = live === true ? {} : live; S.live = l ? { budget: clamp(+l.budget || 6, 1, 50), settle: clamp(l.settle ?? 60, 0, 1000), floor: clamp(l.floor ?? .5, 0, 1) } : null; } // floor: draft maps never drop below this fraction of the final map px
         let ch = false;
         if (params && !same(params, S.params)) { S.params = { ...params }; ch = true; }
         if (quality != null && +quality !== S.q) { S.q = clamp(+quality || 0, -1, 1); ch = true; }
