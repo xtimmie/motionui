@@ -3472,7 +3472,7 @@ void main() {
       cx.putImageData(im, 0, 0);
       m = { url: cv.toDataURL(), mw, mh, key };
       S.lastMs = performance.now() - t0;
-      mcache.set(key, m); if (mcache.size > 24) mcache.delete(mcache.keys().next().value);
+      if (!p.draft) { mcache.set(key, m); if (mcache.size > 24) mcache.delete(mcache.keys().next().value); } // live drafts are one shot, they must not evict the real maps
       return m;
     }
 
@@ -3604,9 +3604,17 @@ void main() {
     }
     // merge.groups can be an array or a function returning one (so a single merge can change its members, e.g. frame with or without the right sidebars)
     const grp = g => typeof g.groups === 'function' ? g.groups() : g.groups;
+    // live mode: draft resolution follows how long the last rebuild took, so a draft costs about budget ms whatever the panel size
+    function liveAdapt(ms) { S.dpx = clamp((S.dpx || 40000) * clamp(S.live.budget / Math.max(.5, ms), .7, 1.2), 3000, 160000); }
     function mergeKick(mg) {
       const now = performance.now(), gap = now - mg.lastEv;
       mg.lastEv = now; clearTimeout(mg.t);
+      if (S.live && mg.built) {
+        // one draft per frame, built right inside the resize callback (before paint), full res once it settles
+        if (now - (mg.draftEnd || 0) > 2) { const t0 = performance.now(); mg.draftAt = t0; applyMerge(mg, true); mg.draftEnd = performance.now(); liveAdapt(mg.draftEnd - t0); }
+        mg.t = setTimeout(() => applyMerge(mg), S.live.settle);
+        return;
+      }
       // changes arriving back to back (window drag, sidebar animating): cheap low res draft now and then, full res once it settles
       if (mg.built && gap < 120 && now - mg.draftAt > 90) { mg.draftAt = now; applyMerge(mg, true); }
       mg.t = setTimeout(() => applyMerge(mg), mg.built ? (gap < 120 ? 140 : 40) : 0);
@@ -3818,7 +3826,8 @@ void main() {
       // one set of params for the whole shape, sized off its thinnest member so the rim has the same width all the way around
       const p = resolve({ pb: 0, own: null }, d, d);
       if (p.maxArea > 0 && mem.reduce((s, m) => s + m.w * m.h, 0) > p.maxArea) return false;
-      p.maxMapPx = draft ? Math.min(p.maxMapPx || 45000, 45000) : (p.maxMapPx || 160000) * 2;
+      p.maxMapPx = draft ? Math.min(p.maxMapPx || 45000, S.live ? (S.dpx || 45000) : 45000) : (p.maxMapPx || 160000) * 2;
+      p.draft = !!(draft && S.live);
       let field = null;
       const rEff = cut ? Math.min(mg.close ?? 2, r) : r;
       const R = [0, 0, 0, 0]; R.k = 2; R.mh = Math.min(d / 2, (r || d) * .8);
@@ -3862,7 +3871,11 @@ void main() {
       if (!mg.pend) { mg.pend = true; queueMicrotask(() => { mg.pend = false; applyMerge(mg); }); }
     }
 
-    function applySolo(it) {
+    function soloLive(it) {
+      const t0 = performance.now(); applySolo(it, true); liveAdapt(performance.now() - t0);
+      clearTimeout(it.t); it.t = setTimeout(() => apply(it), S.live.settle);
+    }
+    function applySolo(it, draft) {
       const el = it.el;
       if (!el.isConnected) { drop(it); return; }
       const w = Math.round(el.offsetWidth), h = Math.round(el.offsetHeight);
@@ -3870,6 +3883,7 @@ void main() {
       // --lg-pad = px of the element's height that sit offscreen at the bottom, the glass math only uses the visible part
       it.pb = Math.max(0, Math.min(h - 2, parseFloat(getComputedStyle(el).getPropertyValue('--lg-pad')) || 0));
       const p = resolve(it, w, h);
+      if (draft) { p.maxMapPx = Math.min(p.maxMapPx || 160000, S.dpx || 40000); p.draft = true; }
       if (p.maxArea > 0 && w * h > p.maxArea) { clear(it); return; }
       const m = buildMap(p, w, h, radii(el, w, h)), fk = m.key + '|' + p.scale.toFixed(2);
       // read what the stylesheet wants first (blur/saturate/brightness...), then put url() behind it. important so it also survives mu-noblur
@@ -3891,7 +3905,7 @@ void main() {
       let it = byEl.get(el);
       if (it) { if (o.own !== undefined) { it.own = o.own; refreshPreviews(); } return it; }
       it = { el, group: o.group || null, own: o.own || null, f: null, fk: null, t: 0 };
-      it.ro = new ResizeObserver(() => { const mg = mergeOf(it); if (mg) { mergeKick(mg); return; } clearTimeout(it.t); it.t = setTimeout(() => apply(it), it.fk ? 90 : 0); });
+      it.ro = new ResizeObserver(() => { const mg = mergeOf(it); if (mg) { mergeKick(mg); return; } if (S.live && it.fk) { soloLive(it); return; } clearTimeout(it.t); it.t = setTimeout(() => apply(it), it.fk ? 90 : 0); });
       it.ro.observe(el); S.items.add(it); byEl.set(el, it);
       return it;
     }
@@ -3937,7 +3951,9 @@ void main() {
       get params() { return { ...DEF, ...S.params }; },
       get quality() { return S.q; },
       enable(on = true) { S.on = !!on; sync(); },
-      configure({ params, quality } = {}) {
+      configure({ params, quality, live } = {}) {
+        // live: opt in, { budget: ms one draft rebuild may take (draft resolution adapts to it), settle: ms after the last resize until the full res map is built }. null/false = off
+        if (live !== undefined) { const l = live === true ? {} : live; S.live = l ? { budget: clamp(+l.budget || 6, 1, 50), settle: clamp(l.settle ?? 60, 0, 1000) } : null; }
         let ch = false;
         if (params && !same(params, S.params)) { S.params = { ...params }; ch = true; }
         if (quality != null && +quality !== S.q) { S.q = clamp(+quality || 0, -1, 1); ch = true; }
