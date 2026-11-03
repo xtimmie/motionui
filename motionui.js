@@ -583,16 +583,7 @@
     // lerp helper
     const lerp = (a, b, t) => a + (b - a) * t;
 
-    // css easing via a dummy element
-    let cssEase = null;
-    try {
-      const dummy = document.createElement('div');
-      dummy.style.transition = `opacity ${duration}ms ${easing}`;
-      document.body.appendChild(dummy);
-      getComputedStyle(dummy).opacity; // force style calc
-      dummy.style.opacity = '1';
-      cssEase = dummy;
-    } catch(e) {}
+    // easing is computed in frame() below, no dummy element / forced style recalc needed
 
     function easedT(raw) {
       // approximate css easing via Web Animations if available, else linear
@@ -618,7 +609,7 @@
       };
     }
 
-    if (cssEase) { cssEase.remove(); cssEase = null; }
+    // (dummy element cleanup removed together with the dummy)
 
     if (el._muSpikyRaf) cancelAnimationFrame(el._muSpikyRaf);
 
