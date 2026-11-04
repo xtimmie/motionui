@@ -133,7 +133,7 @@
       let _lastH = from;
       const start = performance.now();
       if (this._animRaf) cancelAnimationFrame(this._animRaf);
-      this._lastStep = 0;
+      this._lastStep = 0; this._gap = 33;
       // seed so an interrupt before the first frame never reads a stale/undefined _shownHue
       this._shownHue = from; this._shownSat = fromSat;
       // watchdog: if rAF gets paused without document.hidden (minimized, webview suspended) finish anyway
@@ -146,8 +146,10 @@
       }, dur + 150);
       const step = now => {
         const t    = Math.min((now - start) / dur, 1);
-        if (t < 1 && now - this._lastStep < 33) { this._animRaf = requestAnimationFrame(step); return; }
+        if (t < 1 && now - this._lastStep < this._gap) { this._animRaf = requestAnimationFrame(step); return; }
         this._lastStep = now;
+        // adaptive throttle: time until the next frame ~ how heavy this step's restyle/paint was, so heavy glass/blur setups get idle gaps (33ms floor = old behavior)
+        const _t0 = now; requestAnimationFrame(t1 => { this._gap = Math.max(33, Math.min(200, (t1 - _t0) * 2)); });
         // ease-in-out-quad
         const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
         const mix  = _gA.map((v, i) => _dec(v + (_gB[i] - v) * ease));
