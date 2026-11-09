@@ -1991,6 +1991,7 @@ void main() {
     // nearest ancestor (up to el) that scrolls vertically, null if none
     const scrollerOf = t => {
       for (let n = t; n; n = n.parentElement) {
+        if (n._sheetScroller) { const vs = n._sheetScroller(); if (vs) return vs; }
         if (n.scrollHeight > n.clientHeight + 1 && /(auto|scroll|overlay)/.test(getComputedStyle(n).overflowY)) return n;
         if (n === el) break;
       }
@@ -2123,7 +2124,7 @@ void main() {
       if (!dragging) {
         // inside a scroller the drag may only start from a gesture the browser has not claimed: while the list is scrolled or the finger moves up the
         // start point keeps following the finger, so reaching the top mid scroll never turns into a sheet drag on top of the scroll
-        if (touchScroller && (touchScroller.scrollTop > 0 || y <= bodyTouchStartY)) { bodyTouchStartY = y; return; }
+        if (touchScroller && (touchScroller.scrollTop > 0 || y <= bodyTouchStartY || (touchScroller.owned && touchScroller.owned()))) { bodyTouchStartY = y; return; }
         const dy = y - bodyTouchStartY;
         if (Math.abs(dy) < BODY_THRESHOLD) return;
         if (touchScroller && !e.cancelable) { bodyTouchStartY = y; return; } // the browser already owns this scroll
